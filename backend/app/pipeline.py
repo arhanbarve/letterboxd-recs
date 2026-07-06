@@ -11,9 +11,12 @@ FALLBACK_THRESHOLD = 3.5
 
 @dataclass
 class Deps:
-    scrape_fn: callable   # (username) -> list[{slug,title,rating,tmdb_id}]
+    scrape_fn: callable   # (username, on_progress=None) -> list[{slug,title,rating,tmdb_id}]
     enrich_fn: callable   # (tmdb_id, api_key) -> metadata dict
     related_fn: callable  # (tmdb_id, api_key) -> list[int]
+
+def _noop(*args, **kwargs):
+    pass
 
 def _liked_ids(rated_meta):
     liked = [m["tmdb_id"] for m in rated_meta if m["rating"] >= LIKED_THRESHOLD]
@@ -37,13 +40,26 @@ def _persist_film(conn, m):
     conn.executemany("INSERT INTO film_cast VALUES (?,?)",
                      [(m["tmdb_id"], a) for a in m["cast"]])
 
-def run_refresh(conn, cfg, deps: Deps) -> None:
-    scraped = deps.scrape_fn(cfg.username)
+def run_refresh(conn, cfg, deps: Deps, on_progress=None) -> None:
+    on_progress = on_progress or _noop
+
+    on_progress({"stage": "scraping", "current": 0, "total": None,
+                 "message": "Scraping your Letterboxd ratings..."})
+    scraped = deps.scrape_fn(
+        cfg.username,
+        on_progress=lambda n: on_progress({
+            "stage": "scraping", "current": n, "total": None,
+            "message": f"Scraping your Letterboxd ratings... {n} found",
+        }),
+    )
 
     rated_meta = []
     conn.execute("DELETE FROM ratings")
     conn.execute("DELETE FROM watched")
-    for f in scraped:
+    total = len(scraped)
+    for i, f in enumerate(scraped):
+        on_progress({"stage": "enriching", "current": i, "total": total,
+                     "message": f"Fetching film details... {i}/{total}"})
         m = deps.enrich_fn(f["tmdb_id"], cfg.tmdb_api_key)
         _persist_film(conn, m)
         conn.execute("INSERT OR REPLACE INTO watched VALUES (?)", (f["tmdb_id"],))
@@ -53,12 +69,19 @@ def run_refresh(conn, cfg, deps: Deps) -> None:
             rm = dict(m); rm["rating"] = f["rating"]
             rated_meta.append(rm)
 
+    on_progress({"stage": "profiling", "current": 0, "total": None,
+                 "message": "Building your taste profile..."})
     profile = build_taste_profile(rated_meta)
     watched_ids = {f["tmdb_id"] for f in scraped}
     pool = build_candidate_pool(_liked_ids(rated_meta), watched_ids,
                                 cfg.tmdb_api_key, related_fn=deps.related_fn)
 
-    cand_meta = [deps.enrich_fn(cid, cfg.tmdb_api_key) for cid in pool]
+    cand_total = len(pool)
+    cand_meta = []
+    for i, cid in enumerate(pool):
+        on_progress({"stage": "scoring", "current": i, "total": cand_total,
+                     "message": f"Scoring candidates... {i}/{cand_total}"})
+        cand_meta.append(deps.enrich_fn(cid, cfg.tmdb_api_key))
     for m in cand_meta:
         _persist_film(conn, m)
 
@@ -73,3 +96,5 @@ def run_refresh(conn, cfg, deps: Deps) -> None:
             (r["tmdb_id"], r["match_pct"], r["predicted_rating"],
              json.dumps(r["why_tags"]), now))
     conn.commit()
+    on_progress({"stage": "done", "current": total, "total": total,
+                 "message": "Done"})

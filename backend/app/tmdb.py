@@ -31,9 +31,30 @@ def enrich(tmdb_id: int, api_key: str, session=None) -> dict:
         "vote_avg": data.get("vote_average"),
     }
 
-def related_ids(tmdb_id: int, api_key: str, session=None) -> list[int]:
+def watch_providers(tmdb_id: int, api_key: str, region: str = "US", session=None) -> dict:
+    data = _get(session, f"{API}/movie/{tmdb_id}/watch/providers", {"api_key": api_key})
+    region_data = data.get("results", {}).get(region, {})
+
+    def normalize(kind):
+        return [
+            {"name": p["provider_name"], "logo_path": p["logo_path"]}
+            for p in region_data.get(kind, [])
+        ]
+
+    return {
+        "link": region_data.get("link"),
+        "flatrate": normalize("flatrate"),
+        "rent": normalize("rent"),
+        "buy": normalize("buy"),
+    }
+
+def related_ids(tmdb_id: int, api_key: str, session=None, pages: int = 1) -> list[int]:
     ids = []
     for endpoint in ("recommendations", "similar"):
-        data = _get(session, f"{API}/movie/{tmdb_id}/{endpoint}", {"api_key": api_key})
-        ids.extend(r["id"] for r in data.get("results", []))
+        for page in range(1, pages + 1):
+            data = _get(session, f"{API}/movie/{tmdb_id}/{endpoint}",
+                        {"api_key": api_key, "page": page})
+            ids.extend(r["id"] for r in data.get("results", []))
+            if page >= data.get("total_pages", 1):
+                break
     return ids

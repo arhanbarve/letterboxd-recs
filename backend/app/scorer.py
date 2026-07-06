@@ -50,6 +50,8 @@ def predict_rating(cand: dict, rated: list[dict], k: int = 10) -> float:
     return sum(w * r for w, r in top) / wsum
 
 def score_candidates(cands, profile, rated, k: int = 10) -> list[dict]:
+    if not cands:
+        return []
     raws = [(c, match_raw_score(c, profile)) for c in cands]
     vals = [r for _, r in raws]
     lo, hi = min(vals), max(vals)

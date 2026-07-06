@@ -13,7 +13,7 @@ def _seed(conn):
 
 def test_get_recommendations_returns_cards(tmp_path):
     conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed(conn)
-    app = create_app(conn_factory=lambda: conn, refresh_fn=lambda conn: None)
+    app = create_app(conn_factory=lambda: conn, refresh_fn=lambda conn, username=None, on_progress=None: None)
     client = TestClient(app)
     resp = client.get("/api/recommendations")
     assert resp.status_code == 200
@@ -27,10 +27,67 @@ def test_get_recommendations_returns_cards(tmp_path):
 def test_post_refresh_invokes_refresh_fn(tmp_path):
     conn = connect(str(tmp_path / "t.db")); init_schema(conn)
     called = {"n": 0}
-    def fake_refresh(c):
+    def fake_refresh(c, username=None, on_progress=None):
         called["n"] += 1
     app = create_app(conn_factory=lambda: conn, refresh_fn=fake_refresh)
     client = TestClient(app)
     resp = client.post("/api/refresh")
     assert resp.status_code == 200
     assert called["n"] == 1
+
+def test_post_refresh_passes_username_override(tmp_path):
+    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    seen = {}
+    def fake_refresh(c, username=None, on_progress=None):
+        seen["username"] = username
+    app = create_app(conn_factory=lambda: conn, refresh_fn=fake_refresh)
+    client = TestClient(app)
+    resp = client.post("/api/refresh", json={"username": "alice"})
+    assert resp.status_code == 200
+    assert seen["username"] == "alice"
+
+def test_post_refresh_without_body_passes_none_username(tmp_path):
+    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    seen = {}
+    def fake_refresh(c, username=None, on_progress=None):
+        seen["username"] = username
+    app = create_app(conn_factory=lambda: conn, refresh_fn=fake_refresh)
+    client = TestClient(app)
+    resp = client.post("/api/refresh")
+    assert resp.status_code == 200
+    assert seen["username"] is None
+
+def test_refresh_status_reflects_progress_reported_during_refresh(tmp_path):
+    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    def fake_refresh(c, username=None, on_progress=None):
+        on_progress({"stage": "enriching", "current": 3, "total": 10, "message": "..."})
+    app = create_app(conn_factory=lambda: conn, refresh_fn=fake_refresh)
+    client = TestClient(app)
+    client.post("/api/refresh")
+    resp = client.get("/api/refresh/status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["stage"] == "enriching"
+    assert body["current"] == 3
+    assert body["total"] == 10
+
+def test_refresh_status_defaults_to_idle(tmp_path):
+    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    app = create_app(conn_factory=lambda: conn, refresh_fn=lambda c, username=None, on_progress=None: None)
+    client = TestClient(app)
+    resp = client.get("/api/refresh/status")
+    assert resp.status_code == 200
+    assert resp.json()["stage"] in ("idle", "done")
+
+def test_get_watch_providers_returns_normalized_data(tmp_path):
+    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    app = create_app(
+        conn_factory=lambda: conn,
+        watch_providers_fn=lambda tid: {"link": "https://x", "flatrate": [{"name": "Netflix", "logo_path": "/n.jpg"}], "rent": [], "buy": []},
+    )
+    client = TestClient(app)
+    resp = client.get("/api/films/496243/watch-providers")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["flatrate"][0]["name"] == "Netflix"
+    assert body["link"] == "https://x"

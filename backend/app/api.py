@@ -1,27 +1,46 @@
+import dataclasses
 import json
+import threading
 from fastapi import FastAPI
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import load_config
 from app.db import connect, init_schema
 from app.pipeline import run_refresh, Deps
 from app.scraper import scrape_profile
-from app.tmdb import enrich, related_ids
+from app.tmdb import enrich, related_ids, watch_providers
 
-def _real_refresh(conn):
+class RefreshRequest(BaseModel):
+    username: str | None = None
+
+def _real_watch_providers(tmdb_id):
     cfg = load_config()
-    deps = Deps(
-        scrape_fn=lambda user: scrape_profile(user),
-        enrich_fn=lambda tid, key: enrich(tid, key),
-        related_fn=lambda tid, key: related_ids(tid, key),
-    )
-    run_refresh(conn, cfg, deps)
+    return watch_providers(tmdb_id, cfg.tmdb_api_key)
 
-def create_app(conn_factory=None, refresh_fn=_real_refresh) -> FastAPI:
+def _real_refresh(conn, username=None, on_progress=None):
+    cfg = load_config()
+    if username:
+        cfg = dataclasses.replace(cfg, username=username)
+    deps = Deps(
+        scrape_fn=lambda user, on_progress=None: scrape_profile(user, on_progress=on_progress),
+        enrich_fn=lambda tid, key: enrich(tid, key),
+        related_fn=lambda tid, key: related_ids(tid, key, pages=3),
+    )
+    run_refresh(conn, cfg, deps, on_progress=on_progress)
+
+def create_app(conn_factory=None, refresh_fn=_real_refresh, watch_providers_fn=_real_watch_providers) -> FastAPI:
     app = FastAPI()
     app.add_middleware(
         CORSMiddleware, allow_origins=["http://localhost:5173"],
         allow_methods=["*"], allow_headers=["*"])
+
+    progress_lock = threading.Lock()
+    progress = {"stage": "idle", "current": 0, "total": None, "message": ""}
+
+    def set_progress(p):
+        with progress_lock:
+            progress.update(p)
 
     def get_conn():
         if conn_factory:
@@ -61,10 +80,24 @@ def create_app(conn_factory=None, refresh_fn=_real_refresh) -> FastAPI:
         }
 
     @app.post("/api/refresh")
-    def refresh():
+    def refresh(body: RefreshRequest | None = None):
         conn = get_conn()
-        refresh_fn(conn)
+        set_progress({"stage": "starting", "current": 0, "total": None, "message": "Starting refresh..."})
+        try:
+            refresh_fn(conn, body.username if body else None, on_progress=set_progress)
+        except Exception as e:
+            set_progress({"stage": "error", "current": 0, "total": None, "message": str(e)})
+            raise
         return {"status": "ok"}
+
+    @app.get("/api/refresh/status")
+    def refresh_status():
+        with progress_lock:
+            return dict(progress)
+
+    @app.get("/api/films/{tmdb_id}/watch-providers")
+    def film_watch_providers(tmdb_id: int):
+        return watch_providers_fn(tmdb_id)
 
     return app
 

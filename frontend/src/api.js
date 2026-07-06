@@ -10,7 +10,21 @@ export async function getTasteProfile() {
   return r.json();
 }
 
-export async function refresh() {
-  const r = await fetch(`${BASE}/api/refresh`, { method: "POST" });
+export async function refresh(username) {
+  const r = await fetch(`${BASE}/api/refresh`, {
+    method: "POST",
+    headers: username ? { "Content-Type": "application/json" } : undefined,
+    body: username ? JSON.stringify({ username }) : undefined,
+  });
+  return r.json();
+}
+
+export async function getRefreshStatus() {
+  const r = await fetch(`${BASE}/api/refresh/status`);
+  return r.json();
+}
+
+export async function getWatchProviders(tmdbId) {
+  const r = await fetch(`${BASE}/api/films/${tmdbId}/watch-providers`);
   return r.json();
 }

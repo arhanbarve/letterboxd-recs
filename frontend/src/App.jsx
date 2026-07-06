@@ -1,16 +1,41 @@
 import { useState } from "react";
 import RecommendationsPage from "./RecommendationsPage";
 import TasteProfilePage from "./TasteProfilePage";
+import UsernameField from "./components/UsernameField";
+import { useLocalStorage } from "./lib/useLocalStorage";
+
+const TABS = [
+  { id: "recs", label: "Recommendations" },
+  { id: "taste", label: "Taste Profile" },
+];
 
 export default function App() {
   const [tab, setTab] = useState("recs");
+  const [username, setUsername] = useLocalStorage("letterboxd_username", "");
+
   return (
-    <div>
-      <nav>
-        <button onClick={() => setTab("recs")}>Recommendations</button>
-        <button onClick={() => setTab("taste")}>Taste Profile</button>
+    <div className="app">
+      <div className="brand">Marquee</div>
+      <nav className="tabs">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            className={`tab${tab === t.id ? " active" : ""}`}
+            onClick={() => setTab(t.id)}
+            aria-current={tab === t.id ? "page" : undefined}
+          >
+            {t.label}
+          </button>
+        ))}
       </nav>
-      {tab === "recs" ? <RecommendationsPage /> : <TasteProfilePage />}
+      <UsernameField value={username} onChange={setUsername} />
+      <div className="page" key={tab}>
+        {tab === "recs" ? (
+          <RecommendationsPage username={username} />
+        ) : (
+          <TasteProfilePage />
+        )}
+      </div>
     </div>
   );
 }

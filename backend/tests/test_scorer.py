@@ -46,3 +46,6 @@ def test_score_candidates_normalizes_and_ranks():
     assert results[0]["tmdb_id"] == 999          # ranked first
     assert results[0]["match_pct"] == 100.0       # top of pool
     assert results[-1]["match_pct"] == 0.0        # bottom of pool
+
+def test_score_candidates_empty_pool_returns_empty_list():
+    assert score_candidates([], PROFILE, [{"rating": 5.0, "genres": ["Thriller"]}]) == []
