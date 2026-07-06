@@ -6,16 +6,16 @@ from app.db import connect, init_schema
 def _seed(conn):
     conn.execute("INSERT INTO films (tmdb_id,title,year,poster_path) VALUES (99,'Rec',2018,'/r.jpg')")
     conn.execute("INSERT INTO film_genres VALUES (99,'Thriller')")
-    conn.execute("INSERT INTO recommendations VALUES (99, 92.0, 4.3, ?, 'now')",
+    conn.execute("INSERT INTO recommendations VALUES ('alice', 99, 92.0, 4.3, ?, 'now')",
                  (json.dumps(["Thriller", "Bong"]),))
-    conn.execute("INSERT INTO ratings (film_id,your_rating) VALUES (99,0)")  # unused row
+    conn.execute("INSERT INTO ratings (username,film_id,your_rating) VALUES ('alice',99,0)")  # unused row
     conn.commit()
 
 def test_get_recommendations_returns_cards(tmp_path):
     conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed(conn)
     app = create_app(conn_factory=lambda: conn, refresh_fn=lambda conn, username=None, on_progress=None: None)
     client = TestClient(app)
-    resp = client.get("/api/recommendations")
+    resp = client.get("/api/recommendations", params={"username": "alice"})
     assert resp.status_code == 200
     body = resp.json()
     assert body[0]["title"] == "Rec"
@@ -23,6 +23,27 @@ def test_get_recommendations_returns_cards(tmp_path):
     assert body[0]["predicted_rating"] == 4.3
     assert body[0]["why_tags"] == ["Thriller", "Bong"]
     assert body[0]["poster_path"] == "/r.jpg"
+
+def test_get_recommendations_scoped_by_username(tmp_path):
+    conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed(conn)
+    app = create_app(conn_factory=lambda: conn, refresh_fn=lambda conn, username=None, on_progress=None: None)
+    client = TestClient(app)
+    resp = client.get("/api/recommendations", params={"username": "bob"})
+    assert resp.status_code == 200
+    assert resp.json() == []  # bob has no recommendations, alice's don't leak
+
+def test_get_taste_profile_scoped_by_username(tmp_path):
+    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn.execute("INSERT INTO films (tmdb_id,title,year) VALUES (1,'X',2000)")
+    conn.execute("INSERT INTO film_genres VALUES (1,'Thriller')")
+    conn.execute("INSERT INTO ratings (username,film_id,your_rating) VALUES ('alice',1,5.0)")
+    conn.commit()
+    app = create_app(conn_factory=lambda: conn, refresh_fn=lambda conn, username=None, on_progress=None: None)
+    client = TestClient(app)
+    resp = client.get("/api/taste-profile", params={"username": "alice"})
+    assert resp.json()["genres"] == [{"name": "Thriller", "count": 1}]
+    resp_bob = client.get("/api/taste-profile", params={"username": "bob"})
+    assert resp_bob.json()["genres"] == []
 
 def test_post_refresh_invokes_refresh_fn(tmp_path):
     conn = connect(str(tmp_path / "t.db")); init_schema(conn)

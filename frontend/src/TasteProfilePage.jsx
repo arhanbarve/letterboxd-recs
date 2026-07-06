@@ -17,12 +17,23 @@ function StubSection({ title, items }) {
   );
 }
 
-export default function TasteProfilePage() {
+export default function TasteProfilePage({ username }) {
   const [profile, setProfile] = useState(null);
 
   useEffect(() => {
-    getTasteProfile().then(setProfile);
-  }, []);
+    if (!username) return;
+    setProfile(null);
+    getTasteProfile(username).then(setProfile);
+  }, [username]);
+
+  if (!username) {
+    return (
+      <div className="empty-state">
+        <h3>Enter your Letterboxd username</h3>
+        <p>Add it above to see your taste profile.</p>
+      </div>
+    );
+  }
 
   const genres = profile?.genres ?? [];
   const actors = profile?.actors ?? [];

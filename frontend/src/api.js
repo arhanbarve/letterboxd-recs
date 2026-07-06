@@ -1,26 +1,26 @@
-const BASE = "http://127.0.0.1:8000";
+const BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
-export async function getRecommendations() {
-  const r = await fetch(`${BASE}/api/recommendations`);
+export async function getRecommendations(username) {
+  const r = await fetch(`${BASE}/api/recommendations?username=${encodeURIComponent(username)}`);
   return r.json();
 }
 
-export async function getTasteProfile() {
-  const r = await fetch(`${BASE}/api/taste-profile`);
+export async function getTasteProfile(username) {
+  const r = await fetch(`${BASE}/api/taste-profile?username=${encodeURIComponent(username)}`);
   return r.json();
 }
 
 export async function refresh(username) {
   const r = await fetch(`${BASE}/api/refresh`, {
     method: "POST",
-    headers: username ? { "Content-Type": "application/json" } : undefined,
-    body: username ? JSON.stringify({ username }) : undefined,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username }),
   });
   return r.json();
 }
 
-export async function getRefreshStatus() {
-  const r = await fetch(`${BASE}/api/refresh/status`);
+export async function getRefreshStatus(username) {
+  const r = await fetch(`${BASE}/api/refresh/status?username=${encodeURIComponent(username)}`);
   return r.json();
 }
 

@@ -1,5 +1,5 @@
 import responses
-from app.tmdb import enrich, related_ids, watch_providers
+from app.tmdb import enrich, related_ids, watch_providers, search_person, discover_by_person
 
 @responses.activate
 def test_enrich_normalizes_movie():
@@ -84,3 +84,29 @@ def test_watch_providers_missing_region_returns_empty():
     )
     result = watch_providers(1, "key", region="US", session=None)
     assert result == {"link": None, "flatrate": [], "rent": [], "buy": []}
+
+@responses.activate
+def test_search_person_returns_top_result_id():
+    responses.add(
+        responses.GET, "https://api.themoviedb.org/3/search/person",
+        json={"results": [{"id": 1032, "name": "Martin Scorsese"}, {"id": 999, "name": "Someone Else"}]},
+        status=200,
+    )
+    assert search_person("Martin Scorsese", "key", session=None) == 1032
+
+@responses.activate
+def test_search_person_no_results_returns_none():
+    responses.add(
+        responses.GET, "https://api.themoviedb.org/3/search/person",
+        json={"results": []}, status=200,
+    )
+    assert search_person("Nobody", "key", session=None) is None
+
+@responses.activate
+def test_discover_by_person_returns_movie_ids():
+    responses.add(
+        responses.GET, "https://api.themoviedb.org/3/discover/movie",
+        json={"results": [{"id": 769, "title": "GoodFellas"}, {"id": 103, "title": "Taxi Driver"}]},
+        status=200,
+    )
+    assert discover_by_person(1032, "key", session=None) == [769, 103]

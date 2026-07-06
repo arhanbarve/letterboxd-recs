@@ -9,11 +9,15 @@ CREATE TABLE IF NOT EXISTS films (
 CREATE TABLE IF NOT EXISTS film_genres (film_id INTEGER, genre TEXT);
 CREATE TABLE IF NOT EXISTS film_keywords (film_id INTEGER, keyword TEXT);
 CREATE TABLE IF NOT EXISTS film_cast (film_id INTEGER, actor TEXT);
-CREATE TABLE IF NOT EXISTS ratings (film_id INTEGER PRIMARY KEY, your_rating REAL, watched_date TEXT);
-CREATE TABLE IF NOT EXISTS watched (film_id INTEGER PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS ratings (
+    username TEXT, film_id INTEGER, your_rating REAL, watched_date TEXT,
+    PRIMARY KEY (username, film_id)
+);
+CREATE TABLE IF NOT EXISTS watched (username TEXT, film_id INTEGER, PRIMARY KEY (username, film_id));
 CREATE TABLE IF NOT EXISTS recommendations (
-    film_id INTEGER PRIMARY KEY, match_pct REAL,
-    predicted_rating REAL, why_tags TEXT, computed_at TEXT
+    username TEXT, film_id INTEGER, match_pct REAL,
+    predicted_rating REAL, why_tags TEXT, computed_at TEXT,
+    PRIMARY KEY (username, film_id)
 );
 """
 

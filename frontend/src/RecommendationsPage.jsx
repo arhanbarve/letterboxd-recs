@@ -42,16 +42,18 @@ export default function RecommendationsPage({ username }) {
   const pollRef = useRef();
 
   const load = async () => {
+    if (!username) return;
     try {
-      setRecs(await getRecommendations());
+      setRecs(await getRecommendations(username));
     } catch {
       setError("Couldn't load recommendations. Is the backend running?");
     }
   };
 
   useEffect(() => {
+    setRecs(null);
     load();
-  }, []);
+  }, [username]);
 
   const onRefresh = async () => {
     if (!username) {
@@ -64,7 +66,7 @@ export default function RecommendationsPage({ username }) {
 
     pollRef.current = setInterval(async () => {
       try {
-        setProgress(await getRefreshStatus());
+        setProgress(await getRefreshStatus(username));
       } catch {
         // transient poll failure, keep trying
       }
@@ -107,9 +109,16 @@ export default function RecommendationsPage({ username }) {
         </div>
       )}
 
-      {recs === null && <SkeletonGrid />}
+      {!username && (
+        <div className="empty-state">
+          <h3>Enter your Letterboxd username</h3>
+          <p>Add it above, then click "Refresh my data" to generate recommendations.</p>
+        </div>
+      )}
 
-      {recs !== null && recs.length === 0 && (
+      {username && recs === null && <SkeletonGrid />}
+
+      {username && recs !== null && recs.length === 0 && (
         <div className="empty-state">
           <h3>No recommendations yet</h3>
           <p>Click "Refresh my data" to scrape your Letterboxd ratings and generate picks.</p>

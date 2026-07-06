@@ -48,6 +48,20 @@ def watch_providers(tmdb_id: int, api_key: str, region: str = "US", session=None
         "buy": normalize("buy"),
     }
 
+def search_person(name: str, api_key: str, session=None) -> int | None:
+    data = _get(session, f"{API}/search/person", {"api_key": api_key, "query": name})
+    results = data.get("results", [])
+    return results[0]["id"] if results else None
+
+def discover_by_person(person_id: int, api_key: str, session=None) -> list[int]:
+    data = _get(session, f"{API}/discover/movie", {
+        "api_key": api_key,
+        "with_people": person_id,
+        "sort_by": "vote_average.desc",
+        "vote_count.gte": 50,
+    })
+    return [m["id"] for m in data.get("results", [])]
+
 def related_ids(tmdb_id: int, api_key: str, session=None, pages: int = 1) -> list[int]:
     ids = []
     for endpoint in ("recommendations", "similar"):

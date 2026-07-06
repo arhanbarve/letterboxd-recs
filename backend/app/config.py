@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -9,10 +9,13 @@ class Config:
     username: str
     tmdb_api_key: str
     db_path: str
+    cors_origins: list[str] = field(default_factory=lambda: ["http://localhost:5173"])
 
 def load_config() -> Config:
+    origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173")
     return Config(
-        username=os.environ["LETTERBOXD_USERNAME"],
+        username=os.environ.get("LETTERBOXD_USERNAME", ""),
         tmdb_api_key=os.environ["TMDB_API_KEY"],
         db_path=os.environ.get("DB_PATH", "letterboxd.db"),
+        cors_origins=[o.strip() for o in origins.split(",")],
     )

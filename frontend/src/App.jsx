@@ -33,7 +33,7 @@ export default function App() {
         {tab === "recs" ? (
           <RecommendationsPage username={username} />
         ) : (
-          <TasteProfilePage />
+          <TasteProfilePage username={username} />
         )}
       </div>
     </div>
