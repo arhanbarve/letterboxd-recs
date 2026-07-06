@@ -30,3 +30,10 @@ def enrich(tmdb_id: int, api_key: str, session=None) -> dict:
         "poster_path": data.get("poster_path"),
         "vote_avg": data.get("vote_average"),
     }
+
+def related_ids(tmdb_id: int, api_key: str, session=None) -> list[int]:
+    ids = []
+    for endpoint in ("recommendations", "similar"):
+        data = _get(session, f"{API}/movie/{tmdb_id}/{endpoint}", {"api_key": api_key})
+        ids.extend(r["id"] for r in data.get("results", []))
+    return ids
