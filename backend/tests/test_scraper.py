@@ -18,3 +18,12 @@ def test_parse_films_page_finds_next_page():
     assert parse_next_page_url(html) == "/alice/films/page/2/"
 
 from app.scraper import parse_next_page_url  # noqa: E402
+
+from app.scraper import parse_tmdb_id
+
+def test_parse_tmdb_id_from_film_page():
+    html = (FIX / "film_detail.html").read_text()
+    assert parse_tmdb_id(html) == 496243
+
+def test_parse_tmdb_id_missing_returns_none():
+    assert parse_tmdb_id("<html><body>no link</body></html>") is None

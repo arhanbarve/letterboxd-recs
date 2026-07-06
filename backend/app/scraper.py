@@ -1,3 +1,5 @@
+import re
+
 from bs4 import BeautifulSoup
 
 def _rating_from_class(rating_span) -> float | None:
@@ -27,3 +29,11 @@ def parse_next_page_url(html: str) -> str | None:
     soup = BeautifulSoup(html, "html.parser")
     nxt = soup.select_one("div.paginate-nextprev a.next")
     return nxt.get("href") if nxt else None
+
+def parse_tmdb_id(html: str) -> int | None:
+    soup = BeautifulSoup(html, "html.parser")
+    link = soup.select_one('a[data-track-action="TMDb"]')
+    if link is None:
+        return None
+    m = re.search(r"/movie/(\d+)", link.get("href", ""))
+    return int(m.group(1)) if m else None
