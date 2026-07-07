@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { getTasteProfile } from "./api";
+import { getTasteProfile, getLastUpdated } from "./api";
 import GenreRadar from "./components/GenreRadar";
+import LastUpdated from "./components/LastUpdated";
 
 const FACE = "https://image.tmdb.org/t/p/w185";
 
@@ -66,11 +67,14 @@ function AffinityBars({ genres }) {
 
 export default function TasteProfilePage({ username }) {
   const [dash, setDash] = useState(null);
+  const [updatedAt, setUpdatedAt] = useState(null);
 
   useEffect(() => {
     if (!username) return;
     setDash(null);
+    setUpdatedAt(null);
     getTasteProfile(username).then(setDash);
+    getLastUpdated(username).then((r) => setUpdatedAt(r.last_updated)).catch(() => {});
   }, [username]);
 
   if (!username) {
@@ -95,7 +99,10 @@ export default function TasteProfilePage({ username }) {
 
   return (
     <div className="taste-dashboard">
-      <div className="dashboard-eyebrow">Your Taste Fingerprint</div>
+      <div className="dashboard-eyebrow-row">
+        <div className="dashboard-eyebrow">Your Taste Fingerprint</div>
+        <LastUpdated iso={updatedAt} />
+      </div>
 
       <div className="stat-row">
         <StatTile value={dash.total_rated} label="Films rated" />

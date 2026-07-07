@@ -674,9 +674,12 @@ input:focus-visible,
 
 /* Taste dashboard */
 .taste-dashboard { max-width: 900px; }
+.dashboard-eyebrow-row {
+  display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px;
+}
 .dashboard-eyebrow {
   font-family: var(--font-display); letter-spacing: 0.22em; font-size: 15px;
-  color: var(--accent); margin-bottom: 18px;
+  color: var(--accent);
 }
 .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 28px; }
 .stat-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
