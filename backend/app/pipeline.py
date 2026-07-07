@@ -33,12 +33,24 @@ def _top_people(profile, n=TOP_PEOPLE_COUNT):
     names = [name for name, score in (directors[:n] + actors[:n]) if score > 0]
     return names
 
-def _persist_film(conn, m):
+def _persist_person(conn, person):
+    if person is None:
+        return
     conn.execute(
-        "INSERT OR REPLACE INTO films (tmdb_id,title,year,decade,director,poster_path,tmdb_vote_avg)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (m["tmdb_id"], m["title"], m["year"], m["decade"], m["director"],
-         m["poster_path"], m["vote_avg"]))
+        "INSERT OR REPLACE INTO people (person_id, name, profile_path) VALUES (?,?,?)",
+        (person["person_id"], person["name"], person["profile_path"]))
+
+def _persist_film(conn, m):
+    _persist_person(conn, m.get("director_person"))
+    for p in m.get("cast_people", []):
+        _persist_person(conn, p)
+
+    conn.execute(
+        "INSERT OR REPLACE INTO films"
+        " (tmdb_id,title,year,decade,director,director_id,poster_path,backdrop_path,overview,runtime,tmdb_vote_avg)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (m["tmdb_id"], m["title"], m["year"], m["decade"], m["director"], m.get("director_id"),
+         m["poster_path"], m.get("backdrop_path"), m.get("overview"), m.get("runtime"), m["vote_avg"]))
     conn.execute("DELETE FROM film_genres WHERE film_id=?", (m["tmdb_id"],))
     conn.execute("DELETE FROM film_keywords WHERE film_id=?", (m["tmdb_id"],))
     conn.execute("DELETE FROM film_cast WHERE film_id=?", (m["tmdb_id"],))
@@ -46,8 +58,9 @@ def _persist_film(conn, m):
                      [(m["tmdb_id"], g) for g in m["genres"]])
     conn.executemany("INSERT INTO film_keywords VALUES (?,?)",
                      [(m["tmdb_id"], k) for k in m["keywords"]])
-    conn.executemany("INSERT INTO film_cast VALUES (?,?)",
-                     [(m["tmdb_id"], a) for a in m["cast"]])
+    cast_people_by_name = {p["name"]: p["person_id"] for p in m.get("cast_people", [])}
+    conn.executemany("INSERT INTO film_cast VALUES (?,?,?)",
+                     [(m["tmdb_id"], a, cast_people_by_name.get(a)) for a in m["cast"]])
 
 def run_refresh(conn, cfg, deps: Deps, on_progress=None) -> None:
     on_progress = on_progress or _noop
@@ -110,10 +123,10 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None) -> None:
     conn.execute("DELETE FROM recommendations WHERE username=?", (cfg.username,))
     for r in results:
         conn.execute(
-            "INSERT INTO recommendations (username,film_id,match_pct,predicted_rating,why_tags,computed_at)"
+            "INSERT INTO recommendations (username,film_id,match_pct,predicted_rating,why,computed_at)"
             " VALUES (?,?,?,?,?,?)",
             (cfg.username, r["tmdb_id"], r["match_pct"], r["predicted_rating"],
-             json.dumps(r["why_tags"]), now))
+             json.dumps(r["why"]), now))
     conn.commit()
     on_progress({"stage": "done", "current": total, "total": total,
                  "message": "Done"})

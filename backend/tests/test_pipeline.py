@@ -14,13 +14,21 @@ def test_run_refresh_persists_recommendations(tmp_path):
     meta = {
         1: {"tmdb_id": 1, "title": "Parasite", "year": 2019, "decade": 2010,
             "director": "Bong", "genres": ["Thriller"], "cast": ["Song"],
-            "keywords": ["class conflict"], "poster_path": "/p.jpg", "vote_avg": 8.5},
+            "keywords": ["class conflict"], "poster_path": "/p.jpg", "vote_avg": 8.5,
+            "director_id": 1001, "director_person": {"person_id": 1001, "name": "Bong", "profile_path": "/bong.jpg"},
+            "cast_people": [{"person_id": 2001, "name": "Song", "profile_path": "/song.jpg"}],
+            "backdrop_path": "/p_bd.jpg", "overview": "A poor family schemes.", "runtime": 132},
         2: {"tmdb_id": 2, "title": "Meh", "year": 1990, "decade": 1990,
             "director": "X", "genres": ["Comedy"], "cast": [], "keywords": [],
-            "poster_path": None, "vote_avg": 5.0},
+            "poster_path": None, "vote_avg": 5.0,
+            "director_id": 1002, "director_person": {"person_id": 1002, "name": "X", "profile_path": None},
+            "cast_people": [], "backdrop_path": None, "overview": "", "runtime": None},
         99: {"tmdb_id": 99, "title": "Rec", "year": 2018, "decade": 2010,
              "director": "Bong", "genres": ["Thriller"], "cast": ["Song"],
-             "keywords": ["class conflict"], "poster_path": "/r.jpg", "vote_avg": 7.9},
+             "keywords": ["class conflict"], "poster_path": "/r.jpg", "vote_avg": 7.9,
+             "director_id": 1001, "director_person": {"person_id": 1001, "name": "Bong", "profile_path": "/bong.jpg"},
+             "cast_people": [{"person_id": 2001, "name": "Song", "profile_path": "/song.jpg"}],
+             "backdrop_path": "/r_bd.jpg", "overview": "A recommended film.", "runtime": 118},
     }
     deps = Deps(
         scrape_fn=lambda user, on_progress=None: scraped,
@@ -44,7 +52,10 @@ def test_run_refresh_reports_progress_through_stages(tmp_path):
     meta = {
         1: {"tmdb_id": 1, "title": "Parasite", "year": 2019, "decade": 2010,
             "director": "Bong", "genres": ["Thriller"], "cast": ["Song"],
-            "keywords": ["class conflict"], "poster_path": "/p.jpg", "vote_avg": 8.5},
+            "keywords": ["class conflict"], "poster_path": "/p.jpg", "vote_avg": 8.5,
+            "director_id": 1001, "director_person": {"person_id": 1001, "name": "Bong", "profile_path": "/bong.jpg"},
+            "cast_people": [{"person_id": 2001, "name": "Song", "profile_path": "/song.jpg"}],
+            "backdrop_path": "/p_bd.jpg", "overview": "A poor family schemes.", "runtime": 132},
     }
     deps = Deps(
         scrape_fn=lambda user, on_progress=None: scraped,
@@ -68,10 +79,16 @@ def test_run_refresh_includes_person_candidates_when_deps_provided(tmp_path):
     meta = {
         1: {"tmdb_id": 1, "title": "Goodfellas", "year": 1990, "decade": 1990,
             "director": "Scorsese", "genres": ["Crime"], "cast": ["De Niro"],
-            "keywords": [], "poster_path": "/g.jpg", "vote_avg": 8.7},
+            "keywords": [], "poster_path": "/g.jpg", "vote_avg": 8.7,
+            "director_id": 1032, "director_person": {"person_id": 1032, "name": "Scorsese", "profile_path": "/scorsese.jpg"},
+            "cast_people": [{"person_id": 3001, "name": "De Niro", "profile_path": "/deniro.jpg"}],
+            "backdrop_path": "/g_bd.jpg", "overview": "A mob associate rises.", "runtime": 146},
         769: {"tmdb_id": 769, "title": "Taxi Driver", "year": 1976, "decade": 1970,
               "director": "Scorsese", "genres": ["Crime"], "cast": ["De Niro"],
-              "keywords": [], "poster_path": "/t.jpg", "vote_avg": 8.3},
+              "keywords": [], "poster_path": "/t.jpg", "vote_avg": 8.3,
+              "director_id": 1032, "director_person": {"person_id": 1032, "name": "Scorsese", "profile_path": "/scorsese.jpg"},
+              "cast_people": [{"person_id": 3001, "name": "De Niro", "profile_path": "/deniro.jpg"}],
+              "backdrop_path": "/t_bd.jpg", "overview": "A troubled veteran drives at night.", "runtime": 114},
     }
     deps = Deps(
         scrape_fn=lambda user, on_progress=None: scraped,
@@ -93,16 +110,26 @@ def test_run_refresh_is_isolated_per_username(tmp_path):
     meta = {
         1: {"tmdb_id": 1, "title": "Parasite", "year": 2019, "decade": 2010,
             "director": "Bong", "genres": ["Thriller"], "cast": ["Song"],
-            "keywords": [], "poster_path": "/p.jpg", "vote_avg": 8.5},
+            "keywords": [], "poster_path": "/p.jpg", "vote_avg": 8.5,
+            "director_id": 1001, "director_person": {"person_id": 1001, "name": "Bong", "profile_path": "/bong.jpg"},
+            "cast_people": [{"person_id": 2001, "name": "Song", "profile_path": "/song.jpg"}],
+            "backdrop_path": "/p_bd.jpg", "overview": "A poor family schemes.", "runtime": 132},
         2: {"tmdb_id": 2, "title": "Oldboy", "year": 2003, "decade": 2000,
             "director": "Park", "genres": ["Thriller"], "cast": [],
-            "keywords": [], "poster_path": "/o.jpg", "vote_avg": 8.0},
+            "keywords": [], "poster_path": "/o.jpg", "vote_avg": 8.0,
+            "director_id": 1003, "director_person": {"person_id": 1003, "name": "Park", "profile_path": "/park.jpg"},
+            "cast_people": [], "backdrop_path": "/o_bd.jpg", "overview": "A man seeks revenge.", "runtime": 120},
         99: {"tmdb_id": 99, "title": "Rec A", "year": 2018, "decade": 2010,
              "director": "Bong", "genres": ["Thriller"], "cast": ["Song"],
-             "keywords": [], "poster_path": "/r.jpg", "vote_avg": 7.9},
+             "keywords": [], "poster_path": "/r.jpg", "vote_avg": 7.9,
+             "director_id": 1001, "director_person": {"person_id": 1001, "name": "Bong", "profile_path": "/bong.jpg"},
+             "cast_people": [{"person_id": 2001, "name": "Song", "profile_path": "/song.jpg"}],
+             "backdrop_path": "/ra_bd.jpg", "overview": "A recommended film A.", "runtime": 110},
         100: {"tmdb_id": 100, "title": "Rec B", "year": 2018, "decade": 2010,
               "director": "Park", "genres": ["Thriller"], "cast": [],
-              "keywords": [], "poster_path": "/r2.jpg", "vote_avg": 7.9},
+              "keywords": [], "poster_path": "/r2.jpg", "vote_avg": 7.9,
+              "director_id": 1003, "director_person": {"person_id": 1003, "name": "Park", "profile_path": "/park.jpg"},
+              "cast_people": [], "backdrop_path": "/rb_bd.jpg", "overview": "A recommended film B.", "runtime": 108},
     }
 
     alice_cfg = Config(username="alice", tmdb_api_key="k", db_path="t.db")
