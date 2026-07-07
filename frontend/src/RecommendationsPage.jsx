@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { getRecommendations, getRefreshStatus, refresh } from "./api";
+import { getRecommendations, getRefreshStatus, getLastUpdated, refresh } from "./api";
 import RefreshButton from "./components/RefreshButton";
 import RecommendationCard from "./components/RecommendationCard";
 import ProgressBar from "./components/ProgressBar";
 import MarqueeTrio from "./components/MarqueeTrio";
 import FilmDetailModal from "./components/FilmDetailModal";
+import LastUpdated from "./components/LastUpdated";
 
 function SkeletonGrid({ count = 6 }) {
   return (
@@ -26,6 +27,7 @@ export default function RecommendationsPage({ username }) {
   const [error, setError] = useState(null);
   const [progress, setProgress] = useState(null);
   const [selectedFilm, setSelectedFilm] = useState(null);
+  const [updatedAt, setUpdatedAt] = useState(null);
   const pollRef = useRef();
 
   const load = async () => {
@@ -35,10 +37,16 @@ export default function RecommendationsPage({ username }) {
     } catch {
       setError("Couldn't load recommendations. Is the backend running?");
     }
+    try {
+      setUpdatedAt((await getLastUpdated(username)).last_updated);
+    } catch {
+      // non-critical, skip silently
+    }
   };
 
   useEffect(() => {
     setRecs(null);
+    setUpdatedAt(null);
     load();
   }, [username]);
 
@@ -105,7 +113,10 @@ export default function RecommendationsPage({ username }) {
         <h2 style={{ fontSize: 15, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)", fontFamily: "var(--font-body)" }}>
           Recommendations
         </h2>
-        <RefreshButton loading={loading} onClick={onRefresh} />
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <LastUpdated iso={updatedAt} />
+          <RefreshButton loading={loading} onClick={onRefresh} />
+        </div>
       </div>
 
       {loading && <ProgressBar progress={progress} />}

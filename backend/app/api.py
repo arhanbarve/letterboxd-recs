@@ -80,6 +80,14 @@ def create_app(
         conn = get_conn()
         return build_dashboard(conn, username)
 
+    @app.get("/api/last-updated")
+    def last_updated(username: str):
+        conn = get_conn()
+        row = conn.execute(
+            "SELECT MAX(computed_at) AS ts FROM recommendations WHERE username = ?",
+            (username,)).fetchone()
+        return {"last_updated": row["ts"]}
+
     ACTIVE_STAGES = {"starting", "scraping", "enriching", "profiling", "scoring"}
 
     @app.post("/api/refresh")

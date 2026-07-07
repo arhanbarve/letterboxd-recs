@@ -10,6 +10,11 @@ export async function getTasteProfile(username) {
   return r.json();
 }
 
+export async function getLastUpdated(username) {
+  const r = await fetch(`${BASE}/api/last-updated?username=${encodeURIComponent(username)}`);
+  return r.json();
+}
+
 export async function refresh(username) {
   const r = await fetch(`${BASE}/api/refresh`, {
     method: "POST",
