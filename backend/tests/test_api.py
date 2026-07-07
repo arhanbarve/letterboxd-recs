@@ -14,10 +14,14 @@ def _wait_until(cond, timeout=1.0, interval=0.01):
     raise AssertionError("condition not met in time")
 
 def _seed(conn):
-    conn.execute("INSERT INTO films (tmdb_id,title,year,poster_path) VALUES (99,'Rec',2018,'/r.jpg')")
+    conn.execute(
+        "INSERT INTO films (tmdb_id,title,year,poster_path,backdrop_path,overview,runtime,director)"
+        " VALUES (99,'Rec',2018,'/r.jpg','/rb.jpg','A pitch.',108,'Bong')")
     conn.execute("INSERT INTO film_genres VALUES (99,'Thriller')")
+    conn.execute("INSERT INTO film_cast VALUES (99,'Song Kang-ho',1523)")
+    why = {"neighbors": [{"title": "Snowpiercer", "rating": 5.0}], "connection": "directed by Bong"}
     conn.execute("INSERT INTO recommendations VALUES ('alice', 99, 92.0, 4.3, ?, 'now')",
-                 (json.dumps(["Thriller", "Bong"]),))
+                 (json.dumps(why),))
     conn.execute("INSERT INTO ratings (username,film_id,your_rating) VALUES ('alice',99,0)")  # unused row
     conn.commit()
 
@@ -31,8 +35,9 @@ def test_get_recommendations_returns_cards(tmp_path):
     assert body[0]["title"] == "Rec"
     assert body[0]["match_pct"] == 92.0
     assert body[0]["predicted_rating"] == 4.3
-    assert body[0]["why_tags"] == ["Thriller", "Bong"]
+    assert body[0]["why"] == {"neighbors": [{"title": "Snowpiercer", "rating": 5.0}], "connection": "directed by Bong"}
     assert body[0]["poster_path"] == "/r.jpg"
+    assert body[0]["backdrop_path"] == "/rb.jpg"
 
 def test_get_recommendations_scoped_by_username(tmp_path):
     conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed(conn)
@@ -42,18 +47,51 @@ def test_get_recommendations_scoped_by_username(tmp_path):
     assert resp.status_code == 200
     assert resp.json() == []  # bob has no recommendations, alice's don't leak
 
+def test_get_film_detail_returns_full_metadata(tmp_path):
+    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn.execute(
+        "INSERT INTO films (tmdb_id,title,year,poster_path,backdrop_path,overview,runtime,director)"
+        " VALUES (99,'Rec',2018,'/r.jpg','/rb.jpg','A pitch.',108,'Bong')")
+    conn.execute("INSERT INTO film_genres VALUES (99,'Thriller')")
+    conn.execute("INSERT INTO film_genres VALUES (99,'Drama')")
+    conn.execute("INSERT INTO film_cast VALUES (99,'Song Kang-ho',1523)")
+    conn.commit()
+    app = create_app(conn_factory=lambda: conn, refresh_fn=lambda conn, username=None, on_progress=None: None)
+    client = TestClient(app)
+    resp = client.get("/api/films/99")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["title"] == "Rec"
+    assert body["year"] == 2018
+    assert body["runtime"] == 108
+    assert body["director"] == "Bong"
+    assert body["overview"] == "A pitch."
+    assert body["backdrop_path"] == "/rb.jpg"
+    assert body["poster_path"] == "/r.jpg"
+    assert sorted(body["genres"]) == ["Drama", "Thriller"]
+    assert body["cast"] == ["Song Kang-ho"]
+
+def test_get_film_detail_404_for_unknown_film(tmp_path):
+    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    app = create_app(conn_factory=lambda: conn, refresh_fn=lambda conn, username=None, on_progress=None: None)
+    client = TestClient(app)
+    resp = client.get("/api/films/999999")
+    assert resp.status_code == 404
+
 def test_get_taste_profile_scoped_by_username(tmp_path):
     conn = connect(str(tmp_path / "t.db")); init_schema(conn)
-    conn.execute("INSERT INTO films (tmdb_id,title,year) VALUES (1,'X',2000)")
+    conn.execute("INSERT INTO films (tmdb_id,title,year,decade) VALUES (1,'X',2000,2000)")
     conn.execute("INSERT INTO film_genres VALUES (1,'Thriller')")
     conn.execute("INSERT INTO ratings (username,film_id,your_rating) VALUES ('alice',1,5.0)")
     conn.commit()
     app = create_app(conn_factory=lambda: conn, refresh_fn=lambda conn, username=None, on_progress=None: None)
     client = TestClient(app)
     resp = client.get("/api/taste-profile", params={"username": "alice"})
-    assert resp.json()["genres"] == [{"name": "Thriller", "count": 1}]
+    body = resp.json()
+    assert body["total_rated"] == 1
+    assert body["genre_affinities"][0]["name"] == "Thriller"
     resp_bob = client.get("/api/taste-profile", params={"username": "bob"})
-    assert resp_bob.json()["genres"] == []
+    assert resp_bob.json()["total_rated"] == 0
 
 def test_post_refresh_invokes_refresh_fn(tmp_path):
     conn = connect(str(tmp_path / "t.db")); init_schema(conn)

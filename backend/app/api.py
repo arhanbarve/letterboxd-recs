@@ -1,7 +1,7 @@
 import dataclasses
 import json
 import threading
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,6 +10,7 @@ from app.db import connect, init_schema
 from app.pipeline import run_refresh, Deps
 from app.scraper import scrape_profile
 from app.tmdb import enrich, related_ids, watch_providers, search_person, discover_by_person
+from app.taste_dashboard import build_dashboard
 
 class RefreshRequest(BaseModel):
     username: str | None = None
@@ -61,32 +62,23 @@ def create_app(
     def recommendations(username: str):
         conn = get_conn()
         rows = conn.execute(
-            "SELECT f.tmdb_id, f.title, f.year, f.poster_path,"
-            " r.match_pct, r.predicted_rating, r.why_tags"
+            "SELECT f.tmdb_id, f.title, f.year, f.poster_path, f.backdrop_path,"
+            " r.match_pct, r.predicted_rating, r.why"
             " FROM recommendations r JOIN films f ON f.tmdb_id = r.film_id"
             " WHERE r.username = ?"
             " ORDER BY r.match_pct DESC", (username,)).fetchall()
         return [{
             "tmdb_id": r["tmdb_id"], "title": r["title"], "year": r["year"],
-            "poster_path": r["poster_path"], "match_pct": r["match_pct"],
+            "poster_path": r["poster_path"], "backdrop_path": r["backdrop_path"],
+            "match_pct": r["match_pct"],
             "predicted_rating": r["predicted_rating"],
-            "why_tags": json.loads(r["why_tags"]),
+            "why": json.loads(r["why"]) if r["why"] else {"neighbors": [], "connection": None},
         } for r in rows]
 
     @app.get("/api/taste-profile")
     def taste_profile(username: str):
         conn = get_conn()
-        def top(table, col):
-            rows = conn.execute(
-                f"SELECT {col} v, COUNT(*) c FROM {table}"
-                f" JOIN ratings ra ON ra.film_id = {table}.film_id"
-                f" WHERE ra.username = ?"
-                f" GROUP BY {col} ORDER BY c DESC LIMIT 10", (username,)).fetchall()
-            return [{"name": str(r["v"]), "count": r["c"]} for r in rows]
-        return {
-            "genres": top("film_genres", "genre"),
-            "actors": top("film_cast", "actor"),
-        }
+        return build_dashboard(conn, username)
 
     ACTIVE_STAGES = {"starting", "scraping", "enriching", "profiling", "scoring"}
 
@@ -120,6 +112,26 @@ def create_app(
     @app.get("/api/films/{tmdb_id}/watch-providers")
     def film_watch_providers(tmdb_id: int):
         return watch_providers_fn(tmdb_id)
+
+    @app.get("/api/films/{tmdb_id}")
+    def film_detail(tmdb_id: int):
+        conn = get_conn()
+        row = conn.execute(
+            "SELECT tmdb_id, title, year, runtime, director, overview,"
+            " poster_path, backdrop_path, tmdb_vote_avg"
+            " FROM films WHERE tmdb_id = ?", (tmdb_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Film not found")
+        genres = [r["genre"] for r in conn.execute(
+            "SELECT genre FROM film_genres WHERE film_id = ?", (tmdb_id,)).fetchall()]
+        cast = [r["actor"] for r in conn.execute(
+            "SELECT actor FROM film_cast WHERE film_id = ?", (tmdb_id,)).fetchall()]
+        return {
+            "tmdb_id": row["tmdb_id"], "title": row["title"], "year": row["year"],
+            "runtime": row["runtime"], "director": row["director"], "overview": row["overview"],
+            "poster_path": row["poster_path"], "backdrop_path": row["backdrop_path"],
+            "vote_avg": row["tmdb_vote_avg"], "genres": genres, "cast": cast,
+        }
 
     return app
 
