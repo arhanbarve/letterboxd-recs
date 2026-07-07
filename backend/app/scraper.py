@@ -32,6 +32,16 @@ def parse_next_page_url(html: str) -> str | None:
     nxt = soup.select_one("div.paginate-nextprev a.next")
     return nxt.get("href") if nxt else None
 
+def parse_declared_film_count(html: str) -> int | None:
+    soup = BeautifulSoup(html, "html.parser")
+    for h4 in soup.select("h4.profile-statistic"):
+        link = h4.select_one("a")
+        if link and link.get("href", "").rstrip("/").endswith("/films"):
+            value = h4.select_one("span.value")
+            if value:
+                return int(value.get_text(strip=True).replace(",", ""))
+    return None
+
 def parse_tmdb_id(html: str) -> int | None:
     soup = BeautifulSoup(html, "html.parser")
     link = soup.select_one('a[data-track-action="TMDB"]')
@@ -67,25 +77,35 @@ def _get_page():
 def default_get(url: str) -> str:
     page = _get_page()
     backoffs = [2, 5, 10]
+    last_status = None
     for wait in [0] + backoffs:
         if wait:
             time.sleep(wait)
         resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2500)
-        if resp.status not in (403, 429):
+        last_status = resp.status
+        if last_status not in (403, 429):
             return page.content()
-    return page.content()
+    raise RuntimeError(
+        f"Blocked fetching {url}: status {last_status} after {len(backoffs)} retries"
+    )
 
 def scrape_profile(
     username: str, get_html=default_get, delay: float = 1.0, on_progress=None
 ) -> list[dict]:
     films = []
+    total_seen = 0
     url = f"{BASE}/{username}/films/"
     while url:
         html = get_html(url)
-        for entry in parse_films_page(html):
+        page_entries = parse_films_page(html)
+        total_seen += len(page_entries)
+        for entry in page_entries:
             detail = get_html(f"{BASE}/film/{entry['slug']}/")
             entry["tmdb_id"] = parse_tmdb_id(detail)
+            # Films Letterboxd can't link to TMDB can never be produced as a
+            # recommendation candidate (candidates always come from TMDB), so
+            # they're safe to drop here — nothing to exclude them from.
             if entry["tmdb_id"] is not None:
                 films.append(entry)
             if on_progress:
@@ -94,4 +114,13 @@ def scrape_profile(
                 time.sleep(delay)
         nxt = parse_next_page_url(html)
         url = f"{BASE}{nxt}" if nxt else None
+
+    profile_html = get_html(f"{BASE}/{username}/")
+    declared = parse_declared_film_count(profile_html)
+    if declared is not None and total_seen < declared:
+        raise RuntimeError(
+            f"Incomplete scrape: found {total_seen} films but {username}'s "
+            f"Letterboxd profile reports {declared}. The crawl was likely "
+            f"blocked partway through — try refreshing again."
+        )
     return films
