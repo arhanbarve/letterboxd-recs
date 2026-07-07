@@ -30,3 +30,26 @@ def test_ratings_scoped_per_username(tmp_path):
     bob = conn.execute("SELECT your_rating FROM ratings WHERE film_id=1 AND username='bob'").fetchone()
     assert alice[0] == 5.0
     assert bob[0] == 2.0
+
+def test_init_schema_creates_people_table_and_new_columns(tmp_path):
+    conn = connect(str(tmp_path / "t.db"))
+    init_schema(conn)
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "people" in tables
+
+    film_cols = {r[1] for r in conn.execute("PRAGMA table_info(films)")}
+    assert {"backdrop_path", "overview", "runtime", "director_id"} <= film_cols
+
+    cast_cols = {r[1] for r in conn.execute("PRAGMA table_info(film_cast)")}
+    assert "person_id" in cast_cols
+
+    rec_cols = {r[1] for r in conn.execute("PRAGMA table_info(recommendations)")}
+    assert "why" in rec_cols
+
+def test_init_schema_is_idempotent_on_existing_db(tmp_path):
+    db = str(tmp_path / "t.db")
+    conn = connect(db)
+    init_schema(conn)
+    init_schema(conn)  # must not raise on second call
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "people" in tables

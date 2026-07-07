@@ -4,11 +4,14 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS films (
     tmdb_id INTEGER PRIMARY KEY,
     title TEXT, year INTEGER, decade INTEGER,
-    director TEXT, poster_path TEXT, tmdb_vote_avg REAL
+    director TEXT, director_id INTEGER,
+    poster_path TEXT, backdrop_path TEXT, overview TEXT, runtime INTEGER,
+    tmdb_vote_avg REAL
 );
 CREATE TABLE IF NOT EXISTS film_genres (film_id INTEGER, genre TEXT);
 CREATE TABLE IF NOT EXISTS film_keywords (film_id INTEGER, keyword TEXT);
-CREATE TABLE IF NOT EXISTS film_cast (film_id INTEGER, actor TEXT);
+CREATE TABLE IF NOT EXISTS film_cast (film_id INTEGER, actor TEXT, person_id INTEGER);
+CREATE TABLE IF NOT EXISTS people (person_id INTEGER PRIMARY KEY, name TEXT, profile_path TEXT);
 CREATE TABLE IF NOT EXISTS ratings (
     username TEXT, film_id INTEGER, your_rating REAL, watched_date TEXT,
     PRIMARY KEY (username, film_id)
@@ -16,10 +19,21 @@ CREATE TABLE IF NOT EXISTS ratings (
 CREATE TABLE IF NOT EXISTS watched (username TEXT, film_id INTEGER, PRIMARY KEY (username, film_id));
 CREATE TABLE IF NOT EXISTS recommendations (
     username TEXT, film_id INTEGER, match_pct REAL,
-    predicted_rating REAL, why_tags TEXT, computed_at TEXT,
+    predicted_rating REAL, why TEXT, computed_at TEXT,
     PRIMARY KEY (username, film_id)
 );
 """
+
+# sqlite has no "ADD COLUMN IF NOT EXISTS" - applied idempotently by catching
+# the duplicate-column error so init_schema is safe to call on every startup.
+_MIGRATIONS = [
+    "ALTER TABLE films ADD COLUMN director_id INTEGER",
+    "ALTER TABLE films ADD COLUMN backdrop_path TEXT",
+    "ALTER TABLE films ADD COLUMN overview TEXT",
+    "ALTER TABLE films ADD COLUMN runtime INTEGER",
+    "ALTER TABLE film_cast ADD COLUMN person_id INTEGER",
+    "ALTER TABLE recommendations ADD COLUMN why TEXT",
+]
 
 def connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -28,4 +42,9 @@ def connect(db_path: str) -> sqlite3.Connection:
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    for stmt in _MIGRATIONS:
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass  # column already exists
     conn.commit()
