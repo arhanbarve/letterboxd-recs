@@ -88,18 +88,28 @@ def create_app(
             "actors": top("film_cast", "actor"),
         }
 
+    ACTIVE_STAGES = {"starting", "scraping", "enriching", "profiling", "scoring"}
+
     @app.post("/api/refresh")
     def refresh(body: RefreshRequest | None = None):
-        conn = get_conn()
         username = body.username if body else None
         set_progress = make_set_progress(username)
-        set_progress({"stage": "starting", "current": 0, "total": None, "message": "Starting refresh..."})
-        try:
-            refresh_fn(conn, username, on_progress=set_progress)
-        except Exception as e:
-            set_progress({"stage": "error", "current": 0, "total": None, "message": str(e)})
-            raise
-        return {"status": "ok"}
+
+        with progress_lock:
+            if progress_by_user.get(username, {}).get("stage") in ACTIVE_STAGES:
+                return {"status": "already_running"}
+            progress_by_user.setdefault(username, {}).update(
+                {"stage": "starting", "current": 0, "total": None, "message": "Starting refresh..."})
+
+        def run():
+            conn = get_conn()
+            try:
+                refresh_fn(conn, username, on_progress=set_progress)
+            except Exception as e:
+                set_progress({"stage": "error", "current": 0, "total": None, "message": str(e)})
+
+        threading.Thread(target=run, daemon=True).start()
+        return {"status": "started"}
 
     @app.get("/api/refresh/status")
     def refresh_status(username: str | None = None):

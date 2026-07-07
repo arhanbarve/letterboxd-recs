@@ -64,26 +64,34 @@ export default function RecommendationsPage({ username }) {
     setError(null);
     setProgress({ stage: "starting", current: 0, total: null });
 
-    pollRef.current = setInterval(async () => {
-      try {
-        setProgress(await getRefreshStatus(username));
-      } catch {
-        // transient poll failure, keep trying
-      }
-    }, 800);
-
     try {
       await refresh(username);
-      await load();
     } catch {
-      setError(
-        "Refresh failed — check your TMDB key in backend/.env and that the username is a valid public Letterboxd profile, then try again."
-      );
-    } finally {
-      clearInterval(pollRef.current);
+      setError("Couldn't reach the backend to start the refresh. Is it running?");
       setLoading(false);
       setProgress(null);
+      return;
     }
+
+    pollRef.current = setInterval(async () => {
+      let status;
+      try {
+        status = await getRefreshStatus(username);
+      } catch {
+        return; // transient poll failure, keep trying
+      }
+      setProgress(status);
+      if (status.stage === "done") {
+        clearInterval(pollRef.current);
+        setLoading(false);
+        setProgress(null);
+        await load();
+      } else if (status.stage === "error") {
+        clearInterval(pollRef.current);
+        setLoading(false);
+        setError(`Refresh failed — ${status.message || "check your TMDB key and username, then try again."}`);
+      }
+    }, 800);
   };
 
   useEffect(() => () => clearInterval(pollRef.current), []);

@@ -1,7 +1,17 @@
 import json
+import threading
+import time
 from fastapi.testclient import TestClient
 from app.api import create_app
 from app.db import connect, init_schema
+
+def _wait_until(cond, timeout=1.0, interval=0.01):
+    start = time.time()
+    while time.time() - start < timeout:
+        if cond():
+            return
+        time.sleep(interval)
+    raise AssertionError("condition not met in time")
 
 def _seed(conn):
     conn.execute("INSERT INTO films (tmdb_id,title,year,poster_path) VALUES (99,'Rec',2018,'/r.jpg')")
@@ -54,7 +64,7 @@ def test_post_refresh_invokes_refresh_fn(tmp_path):
     client = TestClient(app)
     resp = client.post("/api/refresh")
     assert resp.status_code == 200
-    assert called["n"] == 1
+    _wait_until(lambda: called["n"] == 1)
 
 def test_post_refresh_passes_username_override(tmp_path):
     conn = connect(str(tmp_path / "t.db")); init_schema(conn)
@@ -65,7 +75,7 @@ def test_post_refresh_passes_username_override(tmp_path):
     client = TestClient(app)
     resp = client.post("/api/refresh", json={"username": "alice"})
     assert resp.status_code == 200
-    assert seen["username"] == "alice"
+    _wait_until(lambda: seen.get("username") == "alice")
 
 def test_post_refresh_without_body_passes_none_username(tmp_path):
     conn = connect(str(tmp_path / "t.db")); init_schema(conn)
@@ -76,6 +86,7 @@ def test_post_refresh_without_body_passes_none_username(tmp_path):
     client = TestClient(app)
     resp = client.post("/api/refresh")
     assert resp.status_code == 200
+    _wait_until(lambda: "username" in seen)
     assert seen["username"] is None
 
 def test_refresh_status_reflects_progress_reported_during_refresh(tmp_path):
@@ -85,12 +96,31 @@ def test_refresh_status_reflects_progress_reported_during_refresh(tmp_path):
     app = create_app(conn_factory=lambda: conn, refresh_fn=fake_refresh)
     client = TestClient(app)
     client.post("/api/refresh")
-    resp = client.get("/api/refresh/status")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["stage"] == "enriching"
+
+    body = {}
+    def check():
+        nonlocal body
+        body = client.get("/api/refresh/status").json()
+        return body.get("stage") == "enriching"
+    _wait_until(check)
+
     assert body["current"] == 3
     assert body["total"] == 10
+
+def test_post_refresh_rejects_concurrent_start_for_same_user(tmp_path):
+    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    started = threading.Event()
+    finish = threading.Event()
+    def fake_refresh(c, username=None, on_progress=None):
+        started.set()
+        finish.wait(timeout=2)
+    app = create_app(conn_factory=lambda: conn, refresh_fn=fake_refresh)
+    client = TestClient(app)
+    client.post("/api/refresh", json={"username": "alice"})
+    assert started.wait(timeout=1)
+    resp = client.post("/api/refresh", json={"username": "alice"})
+    assert resp.json()["status"] == "already_running"
+    finish.set()
 
 def test_refresh_status_defaults_to_idle(tmp_path):
     conn = connect(str(tmp_path / "t.db")); init_schema(conn)
