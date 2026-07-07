@@ -1,4 +1,4 @@
-# Marquee — Letterboxd Recommender
+# Letterboxd Recs by Arhan
 
 Scrapes a Letterboxd profile, enriches with TMDB, and recommends unwatched films with a predicted ★ rating and match %. Supports multiple people sharing one deployment — each person's data is scoped to their own Letterboxd username.
 

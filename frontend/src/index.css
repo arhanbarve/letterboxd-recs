@@ -138,8 +138,8 @@ input:focus-visible,
 .brand {
   font-family: var(--font-display);
   font-weight: normal;
-  font-size: 24px;
-  letter-spacing: 0.04em;
+  font-size: clamp(16px, 4.5vw, 20px);
+  letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--accent);
   padding-top: 8px;

@@ -15,7 +15,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <div className="brand">Marquee</div>
+      <div className="brand">Letterboxd Recs by Arhan</div>
       <nav className="tabs">
         {TABS.map((t) => (
           <button
