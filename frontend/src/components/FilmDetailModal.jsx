@@ -27,7 +27,7 @@ export default function FilmDetailModal({ film, onClose }) {
     setDetail(null);
     setProviders(null);
     setProvidersFailed(false);
-    getFilmDetail(film.tmdb_id).then(setDetail);
+    getFilmDetail(film.tmdb_id).then(setDetail).catch(() => {});
     getWatchProviders(film.tmdb_id).then(setProviders).catch(() => setProvidersFailed(true));
   }, [film.tmdb_id]);
 
