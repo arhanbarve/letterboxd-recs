@@ -37,8 +37,17 @@ export default function RecommendationCard({ rec, index = 0, onSelect }) {
           <span className="card-match">{Math.round(match)}% match</span>
           <span className="card-predicted">{predicted.toFixed(1)}★ predicted</span>
         </div>
-        {rec.why_tags?.length > 0 && (
-          <p className="card-why">Because you like: {rec.why_tags.join(", ")}</p>
+        {rec.why?.neighbors?.length > 0 && (
+          <p className="card-why">
+            Because you loved{" "}
+            {rec.why.neighbors.map((n, i) => (
+              <span key={n.title}>
+                {i > 0 && " and "}
+                <b>{n.title}</b> ({n.rating}★)
+              </span>
+            ))}
+            {rec.why.connection ? ` — ${rec.why.connection}.` : "."}
+          </p>
         )}
       </div>
     </div>

@@ -28,3 +28,8 @@ export async function getWatchProviders(tmdbId) {
   const r = await fetch(`${BASE}/api/films/${tmdbId}/watch-providers`);
   return r.json();
 }
+
+export async function getFilmDetail(tmdbId) {
+  const r = await fetch(`${BASE}/api/films/${tmdbId}`);
+  return r.json();
+}
