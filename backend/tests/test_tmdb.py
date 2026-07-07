@@ -8,11 +8,16 @@ def test_enrich_normalizes_movie():
         "https://api.themoviedb.org/3/movie/496243",
         json={
             "title": "Parasite", "release_date": "2019-05-30",
-            "poster_path": "/p.jpg", "vote_average": 8.5,
+            "poster_path": "/p.jpg", "backdrop_path": "/b.jpg",
+            "overview": "Greed and class discrimination threaten a family.",
+            "runtime": 132, "vote_average": 8.5,
             "genres": [{"name": "Thriller"}, {"name": "Comedy"}],
             "credits": {
-                "crew": [{"job": "Director", "name": "Bong Joon-ho"}],
-                "cast": [{"name": "Song Kang-ho"}, {"name": "Lee Sun-kyun"}],
+                "crew": [{"job": "Director", "name": "Bong Joon-ho", "id": 21684, "profile_path": "/d.jpg"}],
+                "cast": [
+                    {"name": "Song Kang-ho", "id": 1523, "profile_path": "/a1.jpg"},
+                    {"name": "Lee Sun-kyun", "id": 21686, "profile_path": None},
+                ],
             },
             "keywords": {"keywords": [{"name": "class conflict"}]},
         },
@@ -24,10 +29,37 @@ def test_enrich_normalizes_movie():
     assert m["year"] == 2019
     assert m["decade"] == 2010
     assert m["director"] == "Bong Joon-ho"
+    assert m["director_id"] == 21684
     assert m["genres"] == ["Thriller", "Comedy"]
     assert m["cast"] == ["Song Kang-ho", "Lee Sun-kyun"]
+    assert m["cast_people"] == [
+        {"person_id": 1523, "name": "Song Kang-ho", "profile_path": "/a1.jpg"},
+        {"person_id": 21686, "name": "Lee Sun-kyun", "profile_path": None},
+    ]
+    assert m["director_person"] == {"person_id": 21684, "name": "Bong Joon-ho", "profile_path": "/d.jpg"}
     assert m["keywords"] == ["class conflict"]
+    assert m["poster_path"] == "/p.jpg"
+    assert m["backdrop_path"] == "/b.jpg"
+    assert m["overview"] == "Greed and class discrimination threaten a family."
+    assert m["runtime"] == 132
     assert m["vote_avg"] == 8.5
+
+@responses.activate
+def test_enrich_handles_missing_director():
+    responses.add(
+        responses.GET,
+        "https://api.themoviedb.org/3/movie/1",
+        json={
+            "title": "No Director Movie", "release_date": "2020-01-01",
+            "genres": [], "credits": {"crew": [], "cast": []},
+            "keywords": {"keywords": []},
+        },
+        status=200,
+    )
+    m = enrich(1, "key", session=None)
+    assert m["director"] is None
+    assert m["director_id"] is None
+    assert m["director_person"] is None
 
 @responses.activate
 def test_related_ids_paginates_across_multiple_pages():

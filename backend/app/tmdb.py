@@ -15,19 +15,31 @@ def enrich(tmdb_id: int, api_key: str, session=None) -> dict:
     })
     year = int(data["release_date"][:4]) if data.get("release_date") else None
     crew = data.get("credits", {}).get("crew", [])
-    director = next((c["name"] for c in crew if c.get("job") == "Director"), None)
-    cast = [c["name"] for c in data.get("credits", {}).get("cast", [])[:5]]
+    director_entry = next((c for c in crew if c.get("job") == "Director"), None)
+    cast_entries = data.get("credits", {}).get("cast", [])[:5]
     keywords = [k["name"] for k in data.get("keywords", {}).get("keywords", [])]
     return {
         "tmdb_id": tmdb_id,
         "title": data.get("title"),
         "year": year,
         "decade": (year // 10) * 10 if year else None,
-        "director": director,
+        "director": director_entry["name"] if director_entry else None,
+        "director_id": director_entry["id"] if director_entry else None,
+        "director_person": ({
+            "person_id": director_entry["id"], "name": director_entry["name"],
+            "profile_path": director_entry.get("profile_path"),
+        } if director_entry else None),
         "genres": [g["name"] for g in data.get("genres", [])],
-        "cast": cast,
+        "cast": [c["name"] for c in cast_entries],
+        "cast_people": [
+            {"person_id": c["id"], "name": c["name"], "profile_path": c.get("profile_path")}
+            for c in cast_entries
+        ],
         "keywords": keywords,
         "poster_path": data.get("poster_path"),
+        "backdrop_path": data.get("backdrop_path"),
+        "overview": data.get("overview"),
+        "runtime": data.get("runtime"),
         "vote_avg": data.get("vote_average"),
     }
 
