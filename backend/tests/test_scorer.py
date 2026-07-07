@@ -40,11 +40,15 @@ RATED_SNOWPIERCER = {"rating": 5.0, "title": "Snowpiercer",
                      "genres": ["Thriller"], "keywords": ["class conflict"]}
 
 def test_top_neighbors_prefers_higher_rated_among_similar():
-    rated = [
-        RATED_SNOWPIERCER,
-        {"rating": 2.0, "title": "Random Comedy", "genres": ["Comedy"], "keywords": []},
-    ]
-    neighbors = top_neighbors(CAND, rated, k=1)
+    # Okay Thriller shares BOTH tokens with CAND (genre + keyword) -> cosine sim 1.0,
+    # strictly higher similarity than Snowpiercer (genre only -> cosine sim ~0.707).
+    # So a pure similarity-sort would rank Okay Thriller first; only the
+    # rating-based re-sort in top_neighbors flips the order to Snowpiercer.
+    lower_rated_but_similar = {"rating": 3.0, "title": "Okay Thriller",
+                                "genres": ["Thriller"], "keywords": ["class conflict"]}
+    higher_rated_and_similar = {"rating": 5.0, "title": "Snowpiercer",
+                                 "genres": ["Thriller"], "keywords": []}
+    neighbors = top_neighbors(CAND, [lower_rated_but_similar, higher_rated_and_similar], k=1)
     assert neighbors[0]["title"] == "Snowpiercer"
 
 def test_connection_phrase_prefers_director_over_cast_and_keywords():
@@ -52,10 +56,25 @@ def test_connection_phrase_prefers_director_over_cast_and_keywords():
                 "cast": ["Song Kang-ho"], "keywords": ["class conflict"], "genres": ["Thriller"]}
     assert connection_phrase(CAND, [neighbor]) == "directed by Bong Joon-ho"
 
+def test_connection_phrase_falls_back_to_shared_cast_when_no_director_match():
+    neighbor = {"title": "Other Film", "rating": 4.0, "director": "Someone Else",
+                "cast": ["Song Kang-ho"], "keywords": [], "genres": []}
+    assert connection_phrase(CAND, [neighbor]) == "starring Song Kang-ho"
+
+def test_connection_phrase_prefers_shared_keyword_over_shared_genre():
+    neighbor = {"title": "Other Film", "rating": 4.0, "director": "Someone Else",
+                "cast": [], "keywords": ["class conflict"], "genres": ["Thriller"]}
+    assert connection_phrase(CAND, [neighbor]) == "a shared thread of class conflict"
+
 def test_connection_phrase_falls_back_to_shared_keyword():
     neighbor = {"title": "Other Film", "rating": 4.0, "director": "Someone Else",
                 "cast": [], "keywords": ["class conflict"], "genres": []}
     assert connection_phrase(CAND, [neighbor]) == "a shared thread of class conflict"
+
+def test_connection_phrase_falls_back_to_shared_genre_when_nothing_else_shared():
+    neighbor = {"title": "Other Film", "rating": 4.0, "director": "Someone Else",
+                "cast": [], "keywords": [], "genres": ["Thriller"]}
+    assert connection_phrase(CAND, [neighbor]) == "the same thriller sensibility"
 
 def test_connection_phrase_returns_none_when_nothing_shared():
     neighbor = {"title": "Unrelated", "rating": 4.0, "director": "Someone Else",
