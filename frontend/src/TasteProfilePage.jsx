@@ -1,29 +1,76 @@
 import { useEffect, useState } from "react";
 import { getTasteProfile } from "./api";
-import TicketStub from "./components/TicketStub";
+import GenreRadar from "./components/GenreRadar";
 
-function StubSection({ title, items }) {
-  if (!items || items.length === 0) return null;
-  const maxCount = Math.max(...items.map((i) => i.count));
+const FACE = "https://image.tmdb.org/t/p/w185";
+
+function StatTile({ value, label }) {
   return (
-    <div className="taste-section">
-      <h2>{title}</h2>
-      <div className="stub-grid">
-        {items.map((i, idx) => (
-          <TicketStub key={i.name} name={i.name} count={i.count} maxCount={maxCount} index={idx} />
+    <div className="stat-tile">
+      <div className="stat-value">{value}</div>
+      <div className="stat-label">{label}</div>
+    </div>
+  );
+}
+
+function RatingHistogram({ distribution }) {
+  const max = Math.max(...distribution.map((b) => b.count), 1);
+  return (
+    <div className="rating-histogram">
+      {distribution.map((b) => (
+        <div key={b.star} className="histogram-bar" style={{ height: `${(b.count / max) * 100}%` }}>
+          <span>{b.star}★</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PeopleWall({ title, people }) {
+  if (!people || people.length === 0) return null;
+  return (
+    <div className="people-wall-section">
+      <p className="section-title">{title}</p>
+      <div className="people-wall">
+        {people.map((p) => (
+          <div className="person-face" key={p.name}>
+            {p.profile_path ? (
+              <img src={FACE + p.profile_path} alt={p.name} />
+            ) : (
+              <div className="person-face-placeholder">{p.name[0]}</div>
+            )}
+            <div className="person-name">{p.name}</div>
+          </div>
         ))}
       </div>
     </div>
   );
 }
 
+function AffinityBars({ genres }) {
+  const top = genres.slice(0, 6);
+  const max = Math.max(...top.map((g) => Math.abs(g.affinity)), 0.01);
+  return (
+    <div className="affinity-bars">
+      {top.map((g) => (
+        <div className="affinity-row" key={g.name}>
+          <span className="affinity-name">{g.name}</span>
+          <span className="affinity-track">
+            <span className="affinity-fill" style={{ width: `${(Math.max(g.affinity, 0) / max) * 100}%` }} />
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function TasteProfilePage({ username }) {
-  const [profile, setProfile] = useState(null);
+  const [dash, setDash] = useState(null);
 
   useEffect(() => {
     if (!username) return;
-    setProfile(null);
-    getTasteProfile(username).then(setProfile);
+    setDash(null);
+    getTasteProfile(username).then(setDash);
   }, [username]);
 
   if (!username) {
@@ -35,10 +82,9 @@ export default function TasteProfilePage({ username }) {
     );
   }
 
-  const genres = profile?.genres ?? [];
-  const actors = profile?.actors ?? [];
+  if (dash === null) return null;
 
-  if (profile && genres.length === 0 && actors.length === 0) {
+  if (dash.total_rated === 0) {
     return (
       <div className="empty-state">
         <h3>No taste profile yet</h3>
@@ -48,9 +94,45 @@ export default function TasteProfilePage({ username }) {
   }
 
   return (
-    <div>
-      <StubSection title="Top Genres" items={genres} />
-      <StubSection title="Top Actors" items={actors} />
+    <div className="taste-dashboard">
+      <div className="dashboard-eyebrow">Your Taste Fingerprint</div>
+
+      <div className="stat-row">
+        <StatTile value={dash.total_rated} label="Films rated" />
+        <StatTile value={dash.average_rating.toFixed(1) + "★"} label="Avg you give" />
+        <StatTile value={dash.favorite_decade ? `${dash.favorite_decade}s` : "—"} label="Favorite decade" />
+        <StatTile value={dash.top_directors[0]?.name ?? "—"} label="Top director" />
+      </div>
+
+      <div className="dashboard-grid">
+        <div>
+          <p className="section-title">How you rate</p>
+          <RatingHistogram distribution={dash.rating_distribution} />
+          <div className="signature-line">{dash.signature}</div>
+        </div>
+        <div>
+          <p className="section-title">Strongest affinities</p>
+          <AffinityBars genres={dash.genre_affinities} />
+          {dash.top_keywords.length > 0 && (
+            <div className="keyword-chips">
+              {dash.top_keywords.map((k) => (
+                <span className="keyword-chip" key={k}>{k}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="dashboard-grid">
+        <div>
+          <p className="section-title">Genre radar</p>
+          <GenreRadar genres={dash.genre_affinities} />
+        </div>
+        <div>
+          <PeopleWall title="Top directors" people={dash.top_directors} />
+          <PeopleWall title="Top actors" people={dash.top_actors} />
+        </div>
+      </div>
     </div>
   );
 }

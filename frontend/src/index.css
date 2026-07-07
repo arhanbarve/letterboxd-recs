@@ -204,98 +204,6 @@ input:focus-visible,
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* ---------- Hero ---------- */
-
-.hero-band {
-  position: relative;
-  overflow: hidden;
-  background: linear-gradient(180deg, var(--surface-raised), var(--surface));
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 28px 24px;
-  margin-bottom: 32px;
-  animation: hero-spotlight 900ms var(--ease-out-expo) both;
-}
-
-@keyframes hero-spotlight {
-  from {
-    opacity: 0;
-    transform: scale(0.98);
-    box-shadow: 0 0 0 0 rgba(212, 169, 74, 0);
-  }
-  60% {
-    box-shadow: 0 0 60px 10px rgba(212, 169, 74, 0.15);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(212, 169, 74, 0);
-  }
-}
-
-.hero-eyebrow {
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  margin-bottom: 10px;
-}
-
-.hero-body {
-  display: flex;
-  gap: 20px;
-  align-items: flex-end;
-  flex-wrap: wrap;
-}
-
-.hero-poster img {
-  width: 96px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-}
-
-.hero-title {
-  font-size: clamp(1.5rem, 2.5vw, 2.25rem);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.hero-meta {
-  color: var(--muted);
-  font-size: 14px;
-  margin-top: 4px;
-}
-
-.hero-stats {
-  display: flex;
-  gap: 20px;
-  margin-top: 12px;
-  align-items: baseline;
-}
-
-.hero-match {
-  color: var(--accent);
-  font-size: 26px;
-  font-weight: 700;
-}
-
-.hero-match span {
-  font-size: 13px;
-  font-weight: 500;
-  margin-left: 4px;
-}
-
-.hero-predicted {
-  font-size: 16px;
-}
-
-.hero-why {
-  color: var(--muted);
-  font-style: italic;
-  font-size: 13px;
-  margin-top: 10px;
-}
-
 /* ---------- Recommendation grid ---------- */
 
 .grid {
@@ -579,53 +487,6 @@ input:focus-visible,
   font-weight: 700;
 }
 
-/* ---------- Taste profile / ticket stubs ---------- */
-
-.taste-section {
-  margin-bottom: 36px;
-}
-
-.taste-section h2 {
-  font-size: 13px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-  font-family: var(--font-body);
-  margin-bottom: 14px;
-}
-
-.stub-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
-}
-
-.ticket-stub {
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  padding: 14px 10px;
-  text-align: center;
-  background: var(--surface);
-  opacity: 0;
-  animation: card-enter var(--dur-entrance) var(--ease-out-expo) both;
-  transition: border-color var(--dur-micro) var(--ease-out-expo);
-}
-
-.ticket-stub .stub-name {
-  font-family: var(--font-display);
-  font-weight: normal;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--ink);
-  font-size: 16px;
-}
-
-.ticket-stub .stub-count {
-  color: var(--muted);
-  font-size: 11px;
-  margin-top: 4px;
-}
-
 /* ---------- Watch providers modal ---------- */
 
 .modal-backdrop {
@@ -746,7 +607,7 @@ input:focus-visible,
     scroll-behavior: auto !important;
   }
 
-  .card, .ticket-stub, .hero-band, .page, .modal, .modal-backdrop {
+  .card, .page, .modal, .modal-backdrop {
     opacity: 1;
     transform: none;
     box-shadow: none;
@@ -761,4 +622,108 @@ input:focus-visible,
     animation: none;
     background: var(--surface-raised);
   }
+}
+
+/* Marquee spotlight trio */
+.marquee-trio-section { margin-bottom: 32px; }
+.marquee-eyebrow {
+  font-family: var(--font-display); letter-spacing: 0.22em; font-size: 14px;
+  color: var(--accent); margin-bottom: 12px;
+}
+.marquee-trio { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 4px; }
+.trio-panel {
+  position: relative; height: 280px; background-size: cover; background-position: center;
+  background-color: var(--surface); display: flex; align-items: flex-end; cursor: pointer;
+  border-radius: 8px; overflow: hidden;
+}
+.trio-scrim {
+  position: absolute; inset: 0;
+  background: linear-gradient(0deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0) 65%);
+}
+.trio-content { position: relative; z-index: 2; padding: 18px; }
+.trio-rank-label { font-family: var(--font-display); color: var(--accent); font-size: 18px; letter-spacing: 0.1em; }
+.trio-title { font-family: var(--font-display); font-size: 28px; line-height: 0.95; margin: 2px 0; color: var(--ink); }
+.trio-year { font-size: 16px; color: var(--muted); }
+.trio-match { color: var(--accent); font-size: 13px; font-weight: 600; }
+
+/* List caps */
+.show-more-button, .long-shots-toggle {
+  display: block; margin: 20px auto; padding: 10px 20px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+  font-family: var(--font-body); cursor: pointer;
+}
+.show-more-button:hover, .long-shots-toggle:hover { border-color: var(--accent); }
+.long-shots-section { margin-top: 24px; }
+
+/* Film detail modal additions */
+.modal-backdrop-image {
+  width: calc(100% + 48px); margin: -24px -24px 16px; height: 200px;
+  background-size: cover; background-position: center; border-radius: 8px 8px 0 0;
+}
+.modal-meta { color: var(--muted); font-size: 13px; margin: 4px 0 12px; }
+.modal-why { font-size: 14px; color: var(--ink); margin-bottom: 12px; }
+.modal-stats { display: flex; gap: 16px; font-size: 14px; color: var(--accent); margin-bottom: 12px; }
+.modal-overview { font-size: 14px; line-height: 1.5; color: var(--ink); margin-bottom: 10px; }
+.modal-genres, .modal-cast { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+
+/* Taste dashboard */
+.taste-dashboard { max-width: 900px; }
+.dashboard-eyebrow {
+  font-family: var(--font-display); letter-spacing: 0.22em; font-size: 15px;
+  color: var(--accent); margin-bottom: 18px;
+}
+.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 28px; }
+.stat-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.stat-value { font-family: var(--font-display); font-size: 36px; color: var(--accent); line-height: 1; }
+.stat-label { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; margin-top: 4px; }
+
+.dashboard-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 28px; margin-bottom: 28px; }
+.section-title { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+
+.rating-histogram { display: flex; align-items: flex-end; gap: 8px; height: 110px; }
+.histogram-bar {
+  flex: 1; background: linear-gradient(180deg, var(--accent), var(--accent-dim));
+  border-radius: 3px 3px 0 0; position: relative; min-height: 4px;
+}
+.histogram-bar span {
+  position: absolute; bottom: -20px; left: 0; right: 0; text-align: center;
+  font-size: 11px; color: var(--muted);
+}
+.signature-line {
+  margin-top: 26px; padding: 14px 16px; border-left: 3px solid var(--accent);
+  background: var(--surface); font-size: 15px; font-style: italic; color: var(--ink);
+}
+
+.affinity-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; font-size: 13px; }
+.affinity-name { width: 110px; color: var(--ink); flex-shrink: 0; }
+.affinity-track { flex: 1; height: 9px; background: var(--surface-raised); border-radius: 6px; overflow: hidden; }
+.affinity-fill { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
+
+.keyword-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.keyword-chip {
+  font-size: 12px; padding: 4px 10px; border-radius: 20px; border: 1px solid var(--border);
+  color: var(--muted); background: var(--surface);
+}
+
+.genre-radar { width: 100%; max-width: 230px; }
+.radar-grid { fill: none; stroke: var(--border); }
+.radar-shape { fill: color-mix(in srgb, var(--accent) 28%, transparent); stroke: var(--accent); stroke-width: 2; }
+.radar-label { fill: var(--muted); font-size: 9px; font-family: var(--font-body); }
+
+.people-wall-section { margin-bottom: 20px; }
+.people-wall { display: flex; flex-wrap: wrap; gap: 14px; }
+.person-face { text-align: center; width: 78px; }
+.person-face img, .person-face-placeholder {
+  width: 64px; height: 64px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent);
+}
+.person-face-placeholder {
+  display: flex; align-items: center; justify-content: center; background: var(--surface);
+  color: var(--accent); font-family: var(--font-display); font-size: 22px;
+}
+.person-name { font-size: 11px; color: var(--ink); margin-top: 6px; }
+
+@media (max-width: 720px) {
+  .marquee-trio { grid-template-columns: 1fr; }
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .stat-row { grid-template-columns: 1fr 1fr; }
 }
