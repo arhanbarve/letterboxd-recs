@@ -1,14 +1,14 @@
 :root {
-  --bg: #0d0705;
-  --surface: #1a120c;
-  --surface-raised: #221609;
-  --border: #3a2418;
-  --ink: #f5ede0;
-  --muted: #a08868;
-  --accent: #e8b34a;
-  --accent-dim: #8a5a1c;
+  --bg: #0a0a0a;
+  --surface: #161616;
+  --surface-raised: #1e1e1e;
+  --border: #333333;
+  --ink: #f5f5f0;
+  --muted: #8a8a85;
+  --accent: #d4a94a;
+  --accent-dim: #7a6127;
 
-  --font-display: "Playfair Display", Georgia, serif;
+  --font-display: "Bebas Neue", Impact, "Arial Narrow Bold", sans-serif;
   --font-body: "Inter", system-ui, sans-serif;
 
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
@@ -44,6 +44,7 @@ body {
 
 h1, h2, h3 {
   font-family: var(--font-display);
+  font-weight: normal;
   color: var(--ink);
   margin: 0;
   text-wrap: balance;
@@ -136,9 +137,10 @@ input:focus-visible,
 
 .brand {
   font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 22px;
-  letter-spacing: -0.02em;
+  font-weight: normal;
+  font-size: 24px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--accent);
   padding-top: 8px;
 }
@@ -219,15 +221,15 @@ input:focus-visible,
   from {
     opacity: 0;
     transform: scale(0.98);
-    box-shadow: 0 0 0 0 rgba(232, 179, 74, 0);
+    box-shadow: 0 0 0 0 rgba(212, 169, 74, 0);
   }
   60% {
-    box-shadow: 0 0 60px 10px rgba(232, 179, 74, 0.15);
+    box-shadow: 0 0 60px 10px rgba(212, 169, 74, 0.15);
   }
   to {
     opacity: 1;
     transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(232, 179, 74, 0);
+    box-shadow: 0 0 0 0 rgba(212, 169, 74, 0);
   }
 }
 
@@ -323,7 +325,7 @@ input:focus-visible,
 .card:hover {
   transform: translateY(-4px);
   border-color: var(--accent-dim);
-  box-shadow: 0 12px 24px -8px rgba(232, 179, 74, 0.25);
+  box-shadow: 0 12px 24px -8px rgba(212, 169, 74, 0.25);
 }
 
 .card-poster img {
@@ -348,8 +350,10 @@ input:focus-visible,
 }
 
 .card-title {
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 19px;
+  font-weight: normal;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   line-height: 1.25;
 }
 
@@ -581,9 +585,11 @@ input:focus-visible,
 
 .ticket-stub .stub-name {
   font-family: var(--font-display);
-  font-weight: 700;
+  font-weight: normal;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   color: var(--ink);
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .ticket-stub .stub-count {
