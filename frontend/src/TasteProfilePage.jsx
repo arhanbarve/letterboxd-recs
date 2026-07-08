@@ -70,7 +70,7 @@ function AffinityBars({ genres }) {
 export default function TasteProfilePage({ username }) {
   const [dash, setDash] = useState(null);
   const [updatedAt, setUpdatedAt] = useState(null);
-  const { status, isRunning, lastCompletedAt } = useRefresh();
+  const { isRunning, lastCompletedAt } = useRefresh();
 
   const load = () => {
     if (!username) return;
@@ -105,13 +105,13 @@ export default function TasteProfilePage({ username }) {
   }
 
   if (dash === null) {
-    return isRunning ? <ProgressBar status={status} /> : null;
+    return isRunning ? <ProgressBar /> : null;
   }
 
   if (dash.total_rated === 0) {
     return (
       <div>
-        {isRunning && <ProgressBar status={status} />}
+        {isRunning && <ProgressBar />}
         <div className="empty-state">
           <h3>No taste profile yet</h3>
           <p>Refresh your data from the Recommendations tab to build your taste profile.</p>
@@ -122,7 +122,7 @@ export default function TasteProfilePage({ username }) {
 
   return (
     <div className="taste-dashboard">
-      {isRunning && <ProgressBar status={status} />}
+      {isRunning && <ProgressBar />}
       <div className="dashboard-eyebrow-row">
         <div className="dashboard-eyebrow">Your Taste Fingerprint</div>
         <LastUpdated iso={updatedAt} />

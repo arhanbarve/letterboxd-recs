@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { refresh, getRefreshStatus, cancelRefresh } from "../api";
 
 const ACTIVE_STAGES = new Set(["starting", "scraping", "enriching", "profiling", "scoring"]);
+const TERMINAL_STAGES = new Set(["done", "cancelled", "error"]);
 const POLL_MS = 800;
 
 const RefreshContext = createContext(null);
@@ -13,6 +14,38 @@ export function RefreshProvider({ username, children }) {
   const prevStageRef = useRef(null);
   const activeUserRef = useRef(null);
 
+  // ProgressBar's timing anchors, owned here (not in ProgressBar) so they
+  // survive the tab-switch remount — otherwise switching tabs mid-run resets
+  // the elapsed clock and rewinds the percent back down.
+  const startedAtRef = useRef(null);
+  const stageRef = useRef(null);
+  const stageStartRef = useRef(null);
+  const maxPercentRef = useRef(0);
+  const timing = useMemo(() => ({ startedAtRef, stageStartRef, maxPercentRef }), []);
+
+  const resetTiming = useCallback(() => {
+    startedAtRef.current = null;
+    stageRef.current = null;
+    stageStartRef.current = null;
+    maxPercentRef.current = 0;
+  }, []);
+
+  const trackTiming = useCallback((s) => {
+    const wasTerminal = TERMINAL_STAGES.has(stageRef.current);
+    const isTerminal = TERMINAL_STAGES.has(s.stage);
+    if (wasTerminal && !isTerminal) {
+      // a fresh run started right after the previous one finished/errored/cancelled —
+      // status never goes falsy between runs, so detect the edge explicitly
+      startedAtRef.current = null;
+      maxPercentRef.current = 0;
+    }
+    if (startedAtRef.current === null) startedAtRef.current = Date.now();
+    if (stageRef.current !== s.stage) {
+      stageRef.current = s.stage;
+      stageStartRef.current = Date.now();
+    }
+  }, []);
+
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
@@ -21,6 +54,7 @@ export function RefreshProvider({ username, children }) {
   }, []);
 
   const applyStatus = useCallback((s) => {
+    trackTiming(s);
     setStatus(s);
     if (s.stage === "done" && ACTIVE_STAGES.has(prevStageRef.current)) {
       setLastCompletedAt(Date.now());
@@ -29,7 +63,7 @@ export function RefreshProvider({ username, children }) {
     if (!ACTIVE_STAGES.has(s.stage)) {
       stopPolling();
     }
-  }, [stopPolling]);
+  }, [stopPolling, trackTiming]);
 
   const startPolling = useCallback((user) => {
     stopPolling();
@@ -50,6 +84,7 @@ export function RefreshProvider({ username, children }) {
     stopPolling();
     setStatus(null);
     prevStageRef.current = null;
+    resetTiming();
     if (!username) return undefined;
 
     let cancelled = false;
@@ -71,7 +106,7 @@ export function RefreshProvider({ username, children }) {
       cancelled = true;
       stopPolling();
     };
-  }, [username, applyStatus, startPolling, stopPolling]);
+  }, [username, applyStatus, startPolling, stopPolling, resetTiming]);
 
   const start = useCallback(async () => {
     if (!username) return { status: "no_username" };
@@ -99,7 +134,7 @@ export function RefreshProvider({ username, children }) {
   const isRunning = !!status && ACTIVE_STAGES.has(status.stage);
 
   return (
-    <RefreshContext.Provider value={{ status, isRunning, start, cancel, lastCompletedAt }}>
+    <RefreshContext.Provider value={{ status, isRunning, start, cancel, lastCompletedAt, timing }}>
       {children}
     </RefreshContext.Provider>
   );

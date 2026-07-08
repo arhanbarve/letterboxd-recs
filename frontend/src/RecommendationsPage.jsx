@@ -103,7 +103,7 @@ export default function RecommendationsPage({ username }) {
         </div>
       </div>
 
-      {isRunning && <ProgressBar status={status} />}
+      {isRunning && <ProgressBar />}
 
       {error && (
         <div className="error-banner">

@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { computePercent, computeEtaSec, monotonicPercent, formatClock } from "../lib/progressMath";
+import { useRefresh } from "../context/RefreshContext";
 
 const STAGE_LABELS = {
   starting: "Starting...",
@@ -14,51 +15,24 @@ const STAGE_LABELS = {
 
 const STEP_INDEX = { starting: 1, scraping: 1, enriching: 2, profiling: 3, scoring: 4, done: 4 };
 const TOTAL_STEPS = 4;
-const TERMINAL_STAGES = new Set(["done", "cancelled", "error"]);
 
-export default function ProgressBar({ status }) {
+export default function ProgressBar() {
+  const { status, timing } = useRefresh();
   const [now, setNow] = useState(() => Date.now());
-  const startedAtRef = useRef(null);
-  const stageRef = useRef(null);
-  const stageStartRef = useRef(null);
-  const maxPercentRef = useRef(0);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  useEffect(() => {
-    if (!status) {
-      startedAtRef.current = null;
-      stageRef.current = null;
-      stageStartRef.current = null;
-      maxPercentRef.current = 0;
-      return;
-    }
-    const wasTerminal = TERMINAL_STAGES.has(stageRef.current);
-    const isTerminal = TERMINAL_STAGES.has(status.stage);
-    if (wasTerminal && !isTerminal) {
-      // a fresh run started right after the previous one finished/errored/cancelled —
-      // status never goes falsy between runs, so detect the edge explicitly
-      startedAtRef.current = null;
-      maxPercentRef.current = 0;
-    }
-    if (startedAtRef.current === null) startedAtRef.current = Date.now();
-    if (stageRef.current !== status.stage) {
-      stageRef.current = status.stage;
-      stageStartRef.current = Date.now();
-    }
-  }, [status]);
-
-  const stageElapsedMs = status && stageStartRef.current ? now - stageStartRef.current : 0;
-  const totalElapsedSec = status && startedAtRef.current ? (now - startedAtRef.current) / 1000 : 0;
+  const stageElapsedMs = status && timing.stageStartRef.current ? now - timing.stageStartRef.current : 0;
+  const totalElapsedSec = status && timing.startedAtRef.current ? (now - timing.startedAtRef.current) / 1000 : 0;
   const rawPercent = status ? computePercent(status, { stageElapsedMs }) : 0;
-  const percent = monotonicPercent(rawPercent, maxPercentRef.current);
+  const percent = monotonicPercent(rawPercent, timing.maxPercentRef.current);
 
   useEffect(() => {
-    maxPercentRef.current = percent;
-  }, [percent]);
+    timing.maxPercentRef.current = percent;
+  }, [percent, timing]);
 
   if (!status) return null;
   const { stage, message } = status;
