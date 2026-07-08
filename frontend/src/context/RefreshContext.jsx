@@ -11,6 +11,7 @@ export function RefreshProvider({ username, children }) {
   const [lastCompletedAt, setLastCompletedAt] = useState(null);
   const pollRef = useRef(null);
   const prevStageRef = useRef(null);
+  const activeUserRef = useRef(null);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -21,7 +22,7 @@ export function RefreshProvider({ username, children }) {
 
   const applyStatus = useCallback((s) => {
     setStatus(s);
-    if (s.stage === "done" && prevStageRef.current !== "done") {
+    if (s.stage === "done" && ACTIVE_STAGES.has(prevStageRef.current)) {
       setLastCompletedAt(Date.now());
     }
     prevStageRef.current = s.stage;
@@ -39,11 +40,13 @@ export function RefreshProvider({ username, children }) {
       } catch {
         return; // transient poll failure, keep trying
       }
+      if (user !== activeUserRef.current) return;
       applyStatus(s);
     }, POLL_MS);
   }, [applyStatus, stopPolling]);
 
   useEffect(() => {
+    activeUserRef.current = username;
     stopPolling();
     setStatus(null);
     prevStageRef.current = null;
