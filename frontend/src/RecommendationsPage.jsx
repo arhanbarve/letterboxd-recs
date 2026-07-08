@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { getRecommendations, getRefreshStatus, getLastUpdated, refresh } from "./api";
+import { useEffect, useState } from "react";
+import { getRecommendations, getLastUpdated } from "./api";
+import { useRefresh } from "./context/RefreshContext";
 import RefreshButton from "./components/RefreshButton";
 import RecommendationCard from "./components/RecommendationCard";
 import ProgressBar from "./components/ProgressBar";
@@ -23,12 +24,10 @@ function SkeletonGrid({ count = 6 }) {
 
 export default function RecommendationsPage({ username }) {
   const [recs, setRecs] = useState(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [progress, setProgress] = useState(null);
   const [selectedFilm, setSelectedFilm] = useState(null);
   const [updatedAt, setUpdatedAt] = useState(null);
-  const pollRef = useRef();
+  const { status, isRunning, start, cancel, lastCompletedAt } = useRefresh();
 
   const load = async () => {
     if (!username) return;
@@ -50,46 +49,25 @@ export default function RecommendationsPage({ username }) {
     load();
   }, [username]);
 
+  useEffect(() => {
+    if (lastCompletedAt) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastCompletedAt]);
+
+  useEffect(() => {
+    if (status?.stage === "error") {
+      setError(`Refresh failed — ${status.message || "check your TMDB key and username, then try again."}`);
+    }
+  }, [status]);
+
   const onRefresh = async () => {
     if (!username) {
       setError("Enter your Letterboxd username above before refreshing.");
       return;
     }
-    setLoading(true);
     setError(null);
-    setProgress({ stage: "starting", current: 0, total: null });
-
-    try {
-      await refresh(username);
-    } catch {
-      setError("Couldn't reach the backend to start the refresh. Is it running?");
-      setLoading(false);
-      setProgress(null);
-      return;
-    }
-
-    pollRef.current = setInterval(async () => {
-      let status;
-      try {
-        status = await getRefreshStatus(username);
-      } catch {
-        return; // transient poll failure, keep trying
-      }
-      setProgress(status);
-      if (status.stage === "done") {
-        clearInterval(pollRef.current);
-        setLoading(false);
-        setProgress(null);
-        await load();
-      } else if (status.stage === "error") {
-        clearInterval(pollRef.current);
-        setLoading(false);
-        setError(`Refresh failed — ${status.message || "check your TMDB key and username, then try again."}`);
-      }
-    }, 800);
+    await start();
   };
-
-  useEffect(() => () => clearInterval(pollRef.current), []);
 
   const LONG_SHOT_THRESHOLD = 70;
   const PAGE_SIZE = 25;
@@ -107,6 +85,8 @@ export default function RecommendationsPage({ username }) {
     setShowLongShots(false);
   }, [recs]);
 
+  const hasData = !!(recs && recs.length > 0);
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
@@ -115,11 +95,11 @@ export default function RecommendationsPage({ username }) {
         </h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <LastUpdated iso={updatedAt} />
-          <RefreshButton loading={loading} onClick={onRefresh} />
+          <RefreshButton loading={isRunning} hasData={hasData} onClick={onRefresh} onCancel={cancel} />
         </div>
       </div>
 
-      {loading && <ProgressBar progress={progress} />}
+      {isRunning && <ProgressBar status={status} />}
 
       {error && (
         <div className="error-banner">
@@ -131,16 +111,16 @@ export default function RecommendationsPage({ username }) {
       {!username && (
         <div className="empty-state">
           <h3>Enter your Letterboxd username</h3>
-          <p>Add it above, then click "Refresh my data" to generate recommendations.</p>
+          <p>Add it above, then click "Load my data" to generate recommendations.</p>
         </div>
       )}
 
       {username && recs === null && <SkeletonGrid />}
 
-      {username && recs !== null && recs.length === 0 && (
+      {username && recs !== null && recs.length === 0 && !isRunning && (
         <div className="empty-state">
           <h3>No recommendations yet</h3>
-          <p>Click "Refresh my data" to scrape your Letterboxd ratings and generate picks.</p>
+          <p>Click "Load my data" to scrape your Letterboxd ratings and generate picks.</p>
         </div>
       )}
 

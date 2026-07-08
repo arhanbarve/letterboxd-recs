@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { getTasteProfile, getLastUpdated } from "./api";
+import { useRefresh } from "./context/RefreshContext";
 import GenreRadar from "./components/GenreRadar";
 import LastUpdated from "./components/LastUpdated";
+import ProgressBar from "./components/ProgressBar";
 
 const FACE = "https://image.tmdb.org/t/p/w185";
 
@@ -68,14 +70,26 @@ function AffinityBars({ genres }) {
 export default function TasteProfilePage({ username }) {
   const [dash, setDash] = useState(null);
   const [updatedAt, setUpdatedAt] = useState(null);
+  const { status, isRunning, lastCompletedAt } = useRefresh();
+
+  const load = () => {
+    if (!username) return;
+    getTasteProfile(username).then(setDash);
+    getLastUpdated(username).then((r) => setUpdatedAt(r.last_updated)).catch(() => {});
+  };
 
   useEffect(() => {
     if (!username) return;
     setDash(null);
     setUpdatedAt(null);
-    getTasteProfile(username).then(setDash);
-    getLastUpdated(username).then((r) => setUpdatedAt(r.last_updated)).catch(() => {});
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username]);
+
+  useEffect(() => {
+    if (lastCompletedAt) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastCompletedAt]);
 
   if (!username) {
     return (
@@ -86,19 +100,25 @@ export default function TasteProfilePage({ username }) {
     );
   }
 
-  if (dash === null) return null;
+  if (dash === null) {
+    return isRunning ? <ProgressBar status={status} /> : null;
+  }
 
   if (dash.total_rated === 0) {
     return (
-      <div className="empty-state">
-        <h3>No taste profile yet</h3>
-        <p>Refresh your data from the Recommendations tab to build your taste profile.</p>
+      <div>
+        {isRunning && <ProgressBar status={status} />}
+        <div className="empty-state">
+          <h3>No taste profile yet</h3>
+          <p>Refresh your data from the Recommendations tab to build your taste profile.</p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="taste-dashboard">
+      {isRunning && <ProgressBar status={status} />}
       <div className="dashboard-eyebrow-row">
         <div className="dashboard-eyebrow">Your Taste Fingerprint</div>
         <LastUpdated iso={updatedAt} />

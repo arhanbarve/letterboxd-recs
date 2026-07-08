@@ -98,7 +98,7 @@ input:focus-visible,
   color: var(--ink);
   padding: 8px 12px;
   min-height: 40px;
-  font-size: 14px;
+  font-size: 16px;
   min-width: 200px;
   transition: border-color var(--dur-micro) var(--ease-out-expo);
 }
@@ -334,6 +334,30 @@ input:focus-visible,
 
 .refresh-btn:disabled {
   cursor: progress;
+}
+
+.refresh-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cancel-btn {
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color var(--dur-micro) var(--ease-out-expo),
+    color var(--dur-micro) var(--ease-out-expo);
+}
+
+.cancel-btn:hover {
+  border-color: var(--accent-dim);
+  color: var(--ink);
 }
 
 .refresh-btn.loading::before {
