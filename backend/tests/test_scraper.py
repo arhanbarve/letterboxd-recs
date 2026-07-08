@@ -163,3 +163,20 @@ def test_scrape_profile_closes_browser_on_cancel():
     with pytest.raises(Cancelled):
         scrape_profile("alice", fake_get, delay=0, should_cancel=lambda: True)
     assert closed == {"browser": True, "pw": True}
+
+def test_scrape_profile_raises_cancelled_even_if_browser_close_fails():
+    class _FakeBrowser:
+        def close(self):
+            raise RuntimeError("browser already dead")
+    class _FakePw:
+        def stop(self):
+            raise RuntimeError("pw already stopped")
+    scraper._thread_local.page = object()
+    scraper._thread_local.browser = _FakeBrowser()
+    scraper._thread_local.pw = _FakePw()
+
+    def fake_get(url):
+        raise AssertionError("unreachable")
+    with pytest.raises(Cancelled):
+        scrape_profile("alice", fake_get, delay=0, should_cancel=lambda: True)
+    assert not hasattr(scraper._thread_local, "browser")

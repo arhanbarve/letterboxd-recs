@@ -101,11 +101,10 @@ def create_app(
         with progress_lock:
             if progress_by_user.get(username, {}).get("stage") in ACTIVE_STAGES:
                 return {"status": "already_running"}
-            cancel_events[username] = threading.Event()
+            cancel_event = threading.Event()
+            cancel_events[username] = cancel_event
             progress_by_user.setdefault(username, {}).update(
                 {"stage": "starting", "current": 0, "total": None, "message": "Starting refresh..."})
-
-        cancel_event = cancel_events[username]
 
         def run():
             conn = get_conn()

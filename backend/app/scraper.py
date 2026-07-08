@@ -77,11 +77,17 @@ def _get_page():
     return _thread_local.page
 
 def _close_page():
+    # Swallow close/stop errors so teardown never masks the exception that
+    # triggered it (e.g. a Cancelled propagating through this finally block).
     if hasattr(_thread_local, "browser"):
         try:
             _thread_local.browser.close()
-        finally:
+        except Exception:
+            pass
+        try:
             _thread_local.pw.stop()
+        except Exception:
+            pass
         del _thread_local.page
         del _thread_local.browser
         del _thread_local.pw
