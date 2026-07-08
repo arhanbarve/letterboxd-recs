@@ -3,6 +3,7 @@ import RecommendationsPage from "./RecommendationsPage";
 import TasteProfilePage from "./TasteProfilePage";
 import UsernameField from "./components/UsernameField";
 import { useLocalStorage } from "./lib/useLocalStorage";
+import { RefreshProvider } from "./context/RefreshContext";
 
 const TABS = [
   { id: "recs", label: "Recommendations" },
@@ -29,13 +30,15 @@ export default function App() {
         ))}
       </nav>
       <UsernameField value={username} onChange={setUsername} />
-      <div className="page" key={tab}>
-        {tab === "recs" ? (
-          <RecommendationsPage username={username} />
-        ) : (
-          <TasteProfilePage username={username} />
-        )}
-      </div>
+      <RefreshProvider username={username}>
+        <div className="page" key={tab}>
+          {tab === "recs" ? (
+            <RecommendationsPage username={username} />
+          ) : (
+            <TasteProfilePage username={username} />
+          )}
+        </div>
+      </RefreshProvider>
     </div>
   );
 }

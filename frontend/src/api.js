@@ -29,6 +29,15 @@ export async function getRefreshStatus(username) {
   return r.json();
 }
 
+export async function cancelRefresh(username) {
+  const r = await fetch(`${BASE}/api/refresh/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username }),
+  });
+  return r.json();
+}
+
 export async function getWatchProviders(tmdbId) {
   const r = await fetch(`${BASE}/api/films/${tmdbId}/watch-providers`);
   return r.json();
