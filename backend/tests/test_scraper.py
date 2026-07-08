@@ -103,6 +103,15 @@ def test_default_get_recovers_after_one_retry(monkeypatch):
     monkeypatch.setattr(scraper.time, "sleep", lambda s: None)
     assert scraper.default_get("https://letterboxd.com/alice/films/") == "<html>ok</html>"
 
+def test_default_get_reports_each_attempt_via_on_request(monkeypatch):
+    monkeypatch.setattr(scraper, "_get_page", lambda: _FakePage([429, 200]))
+    monkeypatch.setattr(scraper.time, "sleep", lambda s: None)
+    events = []
+    scraper.default_get("https://letterboxd.com/alice/films/", on_request=events.append)
+    assert [e["status"] for e in events] == [429, 200]
+    assert [e["attempt"] for e in events] == [0, 1]
+    assert all(e["challenged"] is False for e in events)
+
 from app.scraper import parse_declared_film_count
 
 def test_parse_declared_film_count_strips_thousands_comma():

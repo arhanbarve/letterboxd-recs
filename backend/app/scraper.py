@@ -74,16 +74,27 @@ def _get_page():
         _thread_local.page = page
     return _thread_local.page
 
-def default_get(url: str) -> str:
+def default_get(url: str, on_request=None) -> str:
+    # Known limitation: profiles with >~72 rated films 403 on films-page 2.
+    # Confirmed live (see docs/superpowers/plans/2026-07-08-refresh-and-progress-overhaul-plan.md,
+    # Task 0) that pacing/jitter, wider backoff, click-driven pagination, stealth
+    # patching, and browser-context rotation all fail identically at the same
+    # request count — this is Cloudflare rate-limiting by source IP, not fixable
+    # client-side. `on_request` lets a future investigation re-instrument cheaply.
     page = _get_page()
     backoffs = [2, 5, 10]
     last_status = None
-    for wait in [0] + backoffs:
+    for attempt, wait in enumerate([0] + backoffs):
         if wait:
             time.sleep(wait)
+        t0 = time.monotonic()
         resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2500)
+        dt = time.monotonic() - t0
         last_status = resp.status
+        if on_request:
+            challenged = "Just a moment" in page.content() or "cf-browser-verification" in page.content()
+            on_request({"url": url, "status": last_status, "attempt": attempt, "elapsed_s": round(dt, 2), "challenged": challenged})
         if last_status not in (403, 429):
             return page.content()
     raise RuntimeError(
