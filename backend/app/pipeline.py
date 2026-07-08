@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.candidates import build_candidate_pool, build_person_candidate_pool
+from app.errors import Cancelled
 from app.profile import build_taste_profile
 from app.scorer import score_candidates
 
@@ -12,7 +13,7 @@ TOP_PEOPLE_COUNT = 5
 
 @dataclass
 class Deps:
-    scrape_fn: callable   # (username, on_progress=None) -> list[{slug,title,rating,tmdb_id}]
+    scrape_fn: callable   # (username, on_progress=None, should_cancel=None) -> list[{slug,title,rating,tmdb_id}]
     enrich_fn: callable   # (tmdb_id, api_key) -> metadata dict
     related_fn: callable  # (tmdb_id, api_key) -> list[int]
     person_search_fn: callable = None   # (name, api_key) -> person_id | None
@@ -20,6 +21,10 @@ class Deps:
 
 def _noop(*args, **kwargs):
     pass
+
+def _check_cancel(cancel_event):
+    if cancel_event is not None and cancel_event.is_set():
+        raise Cancelled()
 
 def _liked_ids(rated_meta):
     liked = [m["tmdb_id"] for m in rated_meta if m["rating"] >= LIKED_THRESHOLD]
@@ -62,7 +67,7 @@ def _persist_film(conn, m):
     conn.executemany("INSERT INTO film_cast VALUES (?,?,?)",
                      [(m["tmdb_id"], a, cast_people_by_name.get(a)) for a in m["cast"]])
 
-def run_refresh(conn, cfg, deps: Deps, on_progress=None) -> None:
+def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> None:
     on_progress = on_progress or _noop
 
     on_progress({"stage": "scraping", "current": 0, "total": None,
@@ -73,6 +78,7 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None) -> None:
             "stage": "scraping", "current": n, "total": None,
             "message": f"Scraping your Letterboxd ratings... {n} found",
         }),
+        should_cancel=lambda: cancel_event is not None and cancel_event.is_set(),
     )
 
     rated_meta = []
@@ -80,6 +86,7 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None) -> None:
     conn.execute("DELETE FROM watched WHERE username=?", (cfg.username,))
     total = len(scraped)
     for i, f in enumerate(scraped):
+        _check_cancel(cancel_event)
         on_progress({"stage": "enriching", "current": i, "total": total,
                      "message": f"Fetching film details... {i}/{total}"})
         m = deps.enrich_fn(f["tmdb_id"], cfg.tmdb_api_key)
@@ -111,6 +118,7 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None) -> None:
     cand_total = len(pool)
     cand_meta = []
     for i, cid in enumerate(pool):
+        _check_cancel(cancel_event)
         on_progress({"stage": "scoring", "current": i, "total": cand_total,
                      "message": f"Scoring candidates... {i}/{cand_total}"})
         cand_meta.append(deps.enrich_fn(cid, cfg.tmdb_api_key))

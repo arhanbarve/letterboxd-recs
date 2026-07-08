@@ -1,3 +1,5 @@
+import pytest
+
 from app.db import connect, init_schema
 from app.pipeline import run_refresh, Deps
 from app.config import Config
@@ -31,7 +33,7 @@ def test_run_refresh_persists_recommendations(tmp_path):
              "backdrop_path": "/r_bd.jpg", "overview": "A recommended film.", "runtime": 118},
     }
     deps = Deps(
-        scrape_fn=lambda user, on_progress=None: scraped,
+        scrape_fn=lambda user, on_progress=None, should_cancel=None: scraped,
         enrich_fn=lambda tid, key: meta[tid],
         related_fn=lambda tid, key: [99],  # only liked film (1) yields candidate 99
     )
@@ -58,7 +60,7 @@ def test_run_refresh_reports_progress_through_stages(tmp_path):
             "backdrop_path": "/p_bd.jpg", "overview": "A poor family schemes.", "runtime": 132},
     }
     deps = Deps(
-        scrape_fn=lambda user, on_progress=None: scraped,
+        scrape_fn=lambda user, on_progress=None, should_cancel=None: scraped,
         enrich_fn=lambda tid, key: meta[tid],
         related_fn=lambda tid, key: [],
     )
@@ -91,7 +93,7 @@ def test_run_refresh_includes_person_candidates_when_deps_provided(tmp_path):
               "backdrop_path": "/t_bd.jpg", "overview": "A troubled veteran drives at night.", "runtime": 114},
     }
     deps = Deps(
-        scrape_fn=lambda user, on_progress=None: scraped,
+        scrape_fn=lambda user, on_progress=None, should_cancel=None: scraped,
         enrich_fn=lambda tid, key: meta[tid],
         related_fn=lambda tid, key: [],  # no similar-movie candidates at all
         person_search_fn=lambda name, key: 1032 if name == "Scorsese" else None,
@@ -134,7 +136,7 @@ def test_run_refresh_is_isolated_per_username(tmp_path):
 
     alice_cfg = Config(username="alice", tmdb_api_key="k", db_path="t.db")
     alice_deps = Deps(
-        scrape_fn=lambda user, on_progress=None: [
+        scrape_fn=lambda user, on_progress=None, should_cancel=None: [
             {"slug": "parasite", "title": "Parasite", "rating": 5.0, "tmdb_id": 1}],
         enrich_fn=lambda tid, key: meta[tid],
         related_fn=lambda tid, key: [99],
@@ -143,7 +145,7 @@ def test_run_refresh_is_isolated_per_username(tmp_path):
 
     bob_cfg = Config(username="bob", tmdb_api_key="k", db_path="t.db")
     bob_deps = Deps(
-        scrape_fn=lambda user, on_progress=None: [
+        scrape_fn=lambda user, on_progress=None, should_cancel=None: [
             {"slug": "oldboy", "title": "Oldboy", "rating": 5.0, "tmdb_id": 2}],
         enrich_fn=lambda tid, key: meta[tid],
         related_fn=lambda tid, key: [100],
@@ -163,3 +165,62 @@ def test_run_refresh_is_isolated_per_username(tmp_path):
         "SELECT film_id FROM watched WHERE username='bob'")}
     assert alice_watched == {1}
     assert bob_watched == {2}
+
+import threading
+from app.errors import Cancelled
+
+def test_run_refresh_raises_cancelled_when_event_set_before_enrich_loop(tmp_path):
+    conn = connect(str(tmp_path / "t.db"))
+    init_schema(conn)
+    cfg = Config(username="alice", tmdb_api_key="k", db_path="t.db")
+
+    scraped = [{"slug": "parasite", "title": "Parasite", "rating": 5.0, "tmdb_id": 1}]
+    cancel_event = threading.Event()
+    cancel_event.set()  # already cancelled before run starts
+    deps = Deps(
+        scrape_fn=lambda user, on_progress=None, should_cancel=None: scraped,
+        enrich_fn=lambda tid, key: (_ for _ in ()).throw(AssertionError("enrich_fn should not run")),
+        related_fn=lambda tid, key: [],
+    )
+    with pytest.raises(Cancelled):
+        run_refresh(conn, cfg, deps, cancel_event=cancel_event)
+
+def test_run_refresh_raises_cancelled_mid_scoring_loop(tmp_path):
+    conn = connect(str(tmp_path / "t.db"))
+    init_schema(conn)
+    cfg = Config(username="alice", tmdb_api_key="k", db_path="t.db")
+
+    scraped = [{"slug": "parasite", "title": "Parasite", "rating": 5.0, "tmdb_id": 1}]
+    meta = {
+        1: {"tmdb_id": 1, "title": "Parasite", "year": 2019, "decade": 2010,
+            "director": "Bong", "genres": ["Thriller"], "cast": ["Song"],
+            "keywords": [], "poster_path": "/p.jpg", "vote_avg": 8.5,
+            "director_id": 1001, "director_person": {"person_id": 1001, "name": "Bong", "profile_path": "/bong.jpg"},
+            "cast_people": [], "backdrop_path": "/p_bd.jpg", "overview": "...", "runtime": 132},
+        99: {"tmdb_id": 99, "title": "Rec", "year": 2018, "decade": 2010,
+             "director": "Bong", "genres": ["Thriller"], "cast": [],
+             "keywords": [], "poster_path": "/r.jpg", "vote_avg": 7.9,
+             "director_id": 1001, "director_person": {"person_id": 1001, "name": "Bong", "profile_path": "/bong.jpg"},
+             "cast_people": [], "backdrop_path": "/r_bd.jpg", "overview": "...", "runtime": 118},
+        100: {"tmdb_id": 100, "title": "Rec 2", "year": 2017, "decade": 2010,
+              "director": "Bong", "genres": ["Thriller"], "cast": [],
+              "keywords": [], "poster_path": "/r2.jpg", "vote_avg": 7.5,
+              "director_id": 1001, "director_person": {"person_id": 1001, "name": "Bong", "profile_path": "/bong.jpg"},
+              "cast_people": [], "backdrop_path": "/r2_bd.jpg", "overview": "...", "runtime": 100},
+    }
+    cancel_event = threading.Event()
+    calls = {"n": 0}
+    def enrich_fn(tid, key):
+        calls["n"] += 1
+        if calls["n"] == 2:  # 1st call is the enrich stage; this is the scoring loop's 1st call
+            cancel_event.set()
+        return meta[tid]
+    deps = Deps(
+        scrape_fn=lambda user, on_progress=None, should_cancel=None: scraped,
+        enrich_fn=enrich_fn,
+        related_fn=lambda tid, key: [99, 100],  # pool of 2, so a 2nd scoring iteration exists to catch the flag
+    )
+    with pytest.raises(Cancelled):
+        run_refresh(conn, cfg, deps, cancel_event=cancel_event)
+    recs = conn.execute("SELECT * FROM recommendations").fetchall()
+    assert recs == []  # cancelled before the commit at the end

@@ -4,6 +4,8 @@ import time
 
 from bs4 import BeautifulSoup
 
+from app.errors import Cancelled
+
 def _rating_from_class(rating_span) -> float | None:
     if rating_span is None:
         return None
@@ -74,6 +76,16 @@ def _get_page():
         _thread_local.page = page
     return _thread_local.page
 
+def _close_page():
+    if hasattr(_thread_local, "browser"):
+        try:
+            _thread_local.browser.close()
+        finally:
+            _thread_local.pw.stop()
+        del _thread_local.page
+        del _thread_local.browser
+        del _thread_local.pw
+
 def default_get(url: str, on_request=None) -> str:
     # Known limitation: profiles with >~72 rated films 403 on films-page 2.
     # Confirmed live (see docs/superpowers/plans/2026-07-08-refresh-and-progress-overhaul-plan.md,
@@ -102,36 +114,43 @@ def default_get(url: str, on_request=None) -> str:
     )
 
 def scrape_profile(
-    username: str, get_html=default_get, delay: float = 1.0, on_progress=None
+    username: str, get_html=default_get, delay: float = 1.0, on_progress=None, should_cancel=None
 ) -> list[dict]:
     films = []
     total_seen = 0
     url = f"{BASE}/{username}/films/"
-    while url:
-        html = get_html(url)
-        page_entries = parse_films_page(html)
-        total_seen += len(page_entries)
-        for entry in page_entries:
-            detail = get_html(f"{BASE}/film/{entry['slug']}/")
-            entry["tmdb_id"] = parse_tmdb_id(detail)
-            # Films Letterboxd can't link to TMDB can never be produced as a
-            # recommendation candidate (candidates always come from TMDB), so
-            # they're safe to drop here — nothing to exclude them from.
-            if entry["tmdb_id"] is not None:
-                films.append(entry)
-            if on_progress:
-                on_progress(len(films))
-            if delay:
-                time.sleep(delay)
-        nxt = parse_next_page_url(html)
-        url = f"{BASE}{nxt}" if nxt else None
+    try:
+        while url:
+            if should_cancel and should_cancel():
+                raise Cancelled()
+            html = get_html(url)
+            page_entries = parse_films_page(html)
+            total_seen += len(page_entries)
+            for entry in page_entries:
+                if should_cancel and should_cancel():
+                    raise Cancelled()
+                detail = get_html(f"{BASE}/film/{entry['slug']}/")
+                entry["tmdb_id"] = parse_tmdb_id(detail)
+                # Films Letterboxd can't link to TMDB can never be produced as a
+                # recommendation candidate (candidates always come from TMDB), so
+                # they're safe to drop here — nothing to exclude them from.
+                if entry["tmdb_id"] is not None:
+                    films.append(entry)
+                if on_progress:
+                    on_progress(len(films))
+                if delay:
+                    time.sleep(delay)
+            nxt = parse_next_page_url(html)
+            url = f"{BASE}{nxt}" if nxt else None
 
-    profile_html = get_html(f"{BASE}/{username}/")
-    declared = parse_declared_film_count(profile_html)
-    if declared is not None and total_seen < declared:
-        raise RuntimeError(
-            f"Incomplete scrape: found {total_seen} films but {username}'s "
-            f"Letterboxd profile reports {declared}. The crawl was likely "
-            f"blocked partway through — try refreshing again."
-        )
-    return films
+        profile_html = get_html(f"{BASE}/{username}/")
+        declared = parse_declared_film_count(profile_html)
+        if declared is not None and total_seen < declared:
+            raise RuntimeError(
+                f"Incomplete scrape: found {total_seen} films but {username}'s "
+                f"Letterboxd profile reports {declared}. The crawl was likely "
+                f"blocked partway through — try refreshing again."
+            )
+        return films
+    finally:
+        _close_page()

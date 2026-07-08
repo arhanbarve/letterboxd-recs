@@ -120,3 +120,46 @@ def test_parse_declared_film_count_strips_thousands_comma():
 
 def test_parse_declared_film_count_missing_returns_none():
     assert parse_declared_film_count("<html><body>no stats</body></html>") is None
+
+from app.errors import Cancelled
+
+def test_scrape_profile_raises_cancelled_before_films_page_fetch():
+    def fake_get(url):
+        raise AssertionError("get_html should not be called once cancelled")
+    with pytest.raises(Cancelled):
+        scrape_profile("alice", fake_get, delay=0, should_cancel=lambda: True)
+
+def test_scrape_profile_raises_cancelled_mid_film_detail_loop():
+    page1 = (FIX / "films_page.html").read_text()  # 3 films
+    detail = (FIX / "film_detail.html").read_text()
+    calls = {"n": 0}
+    def fake_get(url):
+        if url.endswith("/films/"):
+            return page1
+        calls["n"] += 1
+        return detail
+    def should_cancel():
+        return calls["n"] >= 1  # cancel after the first film-detail fetch
+    with pytest.raises(Cancelled):
+        scrape_profile("alice", fake_get, delay=0, should_cancel=should_cancel)
+
+def test_scrape_profile_closes_browser_on_cancel():
+    closed = {"browser": False, "pw": False}
+    class _FakeBrowser:
+        def close(self):
+            closed["browser"] = True
+    class _FakePw:
+        def stop(self):
+            closed["pw"] = True
+    # Set directly (not via monkeypatch): _close_page deletes these attrs as
+    # part of normal teardown, which would conflict with monkeypatch's own
+    # delattr-on-undo when it recorded no prior value.
+    scraper._thread_local.page = object()
+    scraper._thread_local.browser = _FakeBrowser()
+    scraper._thread_local.pw = _FakePw()
+
+    def fake_get(url):
+        raise AssertionError("unreachable")
+    with pytest.raises(Cancelled):
+        scrape_profile("alice", fake_get, delay=0, should_cancel=lambda: True)
+    assert closed == {"browser": True, "pw": True}
