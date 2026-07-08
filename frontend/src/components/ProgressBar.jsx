@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { computePercent, computeEtaSec, monotonicPercent, formatClock } from "../lib/progressMath";
 
 const STAGE_LABELS = {
   starting: "Starting...",
@@ -7,59 +8,51 @@ const STAGE_LABELS = {
   profiling: "Building your taste profile",
   scoring: "Scoring candidates",
   done: "Done",
+  cancelled: "Cancelled",
   error: "Something went wrong",
 };
 
 const STEP_INDEX = { starting: 1, scraping: 1, enriching: 2, profiling: 3, scoring: 4, done: 4 };
 const TOTAL_STEPS = 4;
 
-function formatClock(totalSeconds) {
-  const s = Math.max(0, Math.round(totalSeconds));
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  return `${m}:${String(rem).padStart(2, "0")}`;
-}
-
-export default function ProgressBar({ progress }) {
+export default function ProgressBar({ status }) {
   const [now, setNow] = useState(() => Date.now());
   const startedAtRef = useRef(null);
   const stageRef = useRef(null);
   const stageStartRef = useRef(null);
+  const maxPercentRef = useRef(0);
 
   useEffect(() => {
-    if (!progress) {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (!status) {
       startedAtRef.current = null;
       stageRef.current = null;
       stageStartRef.current = null;
+      maxPercentRef.current = 0;
       return;
     }
     if (startedAtRef.current === null) startedAtRef.current = Date.now();
-    if (stageRef.current !== progress.stage) {
-      stageRef.current = progress.stage;
+    if (stageRef.current !== status.stage) {
+      stageRef.current = status.stage;
       stageStartRef.current = Date.now();
     }
-  }, [progress]);
+  }, [status]);
 
-  useEffect(() => {
-    if (!progress || progress.stage === "done" || progress.stage === "error") return undefined;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [progress]);
+  if (!status) return null;
+  const { stage, message } = status;
 
-  if (!progress) return null;
-  const { stage, current, total, message } = progress;
-  const determinate = typeof total === "number" && total > 0;
-  const pct = determinate ? Math.min(100, Math.round((current / total) * 100)) : null;
+  const stageElapsedMs = stageStartRef.current ? now - stageStartRef.current : 0;
+  const totalElapsedSec = startedAtRef.current ? (now - startedAtRef.current) / 1000 : 0;
 
-  const elapsedSec = startedAtRef.current ? (now - startedAtRef.current) / 1000 : 0;
-  const stageElapsedSec = stageStartRef.current ? Math.max(1, (now - stageStartRef.current) / 1000) : 1;
+  const rawPercent = computePercent(status, { stageElapsedMs });
+  const percent = monotonicPercent(rawPercent, maxPercentRef.current);
+  maxPercentRef.current = percent;
 
-  let etaSec = null;
-  if (determinate && current > 0 && current < total) {
-    const rate = current / stageElapsedSec;
-    if (rate > 0) etaSec = (total - current) / rate;
-  }
-
+  const etaSec = stage === "cancelled" || stage === "error" ? null : computeEtaSec(status, { stageElapsedMs });
   const step = STEP_INDEX[stage] || 0;
 
   return (
@@ -67,24 +60,20 @@ export default function ProgressBar({ progress }) {
       <div className="progress-label">
         {step > 0 && <span className="progress-step">Step {step}/{TOTAL_STEPS}</span>}
         <span>{STAGE_LABELS[stage] || stage}</span>
-        {determinate && <span className="progress-count">{current}/{total} · {pct}%</span>}
+        <span className="progress-count">{Math.round(percent)}%</span>
       </div>
       <div className="progress-track">
-        <div
-          className={`progress-fill${determinate ? "" : " indeterminate"}`}
-          style={determinate ? { width: `${pct}%` } : undefined}
-        />
+        <div className="progress-fill" style={{ width: `${percent}%` }} />
       </div>
       {stage !== "error" && (
         <div className="progress-meta">
-          <span>Elapsed {formatClock(elapsedSec)}</span>
+          <span>Elapsed {formatClock(totalElapsedSec)}</span>
           {etaSec !== null && <span> · ~{formatClock(etaSec)} left</span>}
         </div>
       )}
       {stage === "scraping" && (
         <div className="progress-note">
-          Letterboxd blocks fast scrapers, so this drives a real browser through each rated film —
-          roughly 3–4s per film. Bigger profiles take longer; this is usually the slowest step.
+          Letterboxd throttles scraping — roughly 3–4s per film, longer for bigger profiles.
         </div>
       )}
       {message && stage === "error" && <div className="progress-error">{message}</div>}
