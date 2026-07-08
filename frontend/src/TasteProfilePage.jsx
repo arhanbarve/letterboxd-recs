@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getTasteProfile, getLastUpdated } from "./api";
 import { useRefresh } from "./context/RefreshContext";
 import GenreRadar from "./components/GenreRadar";
@@ -86,8 +86,12 @@ export default function TasteProfilePage({ username }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username]);
 
+  const lastCompletedAtRef = useRef(lastCompletedAt);
   useEffect(() => {
-    if (lastCompletedAt) load();
+    if (lastCompletedAt && lastCompletedAt !== lastCompletedAtRef.current) {
+      load();
+    }
+    lastCompletedAtRef.current = lastCompletedAt;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastCompletedAt]);
 

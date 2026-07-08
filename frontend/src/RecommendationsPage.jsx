@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getRecommendations, getLastUpdated } from "./api";
 import { useRefresh } from "./context/RefreshContext";
 import RefreshButton from "./components/RefreshButton";
@@ -49,8 +49,12 @@ export default function RecommendationsPage({ username }) {
     load();
   }, [username]);
 
+  const lastCompletedAtRef = useRef(lastCompletedAt);
   useEffect(() => {
-    if (lastCompletedAt) load();
+    if (lastCompletedAt && lastCompletedAt !== lastCompletedAtRef.current) {
+      load();
+    }
+    lastCompletedAtRef.current = lastCompletedAt;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastCompletedAt]);
 
