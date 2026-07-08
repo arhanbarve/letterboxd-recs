@@ -34,7 +34,7 @@ function estimateStageDurationSec(stage, status) {
 function creepFraction(elapsedSec, estimatedSec) {
   if (estimatedSec <= 0) return 0.96;
   const ratio = elapsedSec / estimatedSec;
-  return Math.min(0.96, 1 - Math.exp(-ratio * 1.5));
+  return Math.max(0, Math.min(0.96, 1 - Math.exp(-ratio * 1.5)));
 }
 
 export function computePercent(status, { stageElapsedMs = 0 } = {}) {
@@ -44,7 +44,7 @@ export function computePercent(status, { stageElapsedMs = 0 } = {}) {
     return 0;
   }
   const [floor, ceil] = bandFor(stage);
-  const determinateReady = DETERMINATE_STAGES.has(stage) && typeof status.total === "number" && status.total > 0;
+  const determinateReady = DETERMINATE_STAGES.has(stage) && typeof status.total === "number" && status.total > 0 && typeof status.current === "number";
   if (determinateReady) {
     const frac = Math.min(1, Math.max(0, status.current / status.total));
     return floor + frac * (ceil - floor);
@@ -55,7 +55,7 @@ export function computePercent(status, { stageElapsedMs = 0 } = {}) {
 }
 
 export function monotonicPercent(rawPercent, prevMaxPercent) {
-  return Math.max(rawPercent, prevMaxPercent);
+  return Number.isFinite(rawPercent) ? Math.max(rawPercent, prevMaxPercent) : prevMaxPercent;
 }
 
 const STAGE_ORDER = ["scraping", "enriching", "profiling", "scoring"];

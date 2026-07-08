@@ -14,6 +14,7 @@ const STAGE_LABELS = {
 
 const STEP_INDEX = { starting: 1, scraping: 1, enriching: 2, profiling: 3, scoring: 4, done: 4 };
 const TOTAL_STEPS = 4;
+const TERMINAL_STAGES = new Set(["done", "cancelled", "error"]);
 
 export default function ProgressBar({ status }) {
   const [now, setNow] = useState(() => Date.now());
@@ -35,6 +36,14 @@ export default function ProgressBar({ status }) {
       maxPercentRef.current = 0;
       return;
     }
+    const wasTerminal = TERMINAL_STAGES.has(stageRef.current);
+    const isTerminal = TERMINAL_STAGES.has(status.stage);
+    if (wasTerminal && !isTerminal) {
+      // a fresh run started right after the previous one finished/errored/cancelled —
+      // status never goes falsy between runs, so detect the edge explicitly
+      startedAtRef.current = null;
+      maxPercentRef.current = 0;
+    }
     if (startedAtRef.current === null) startedAtRef.current = Date.now();
     if (stageRef.current !== status.stage) {
       stageRef.current = status.stage;
@@ -42,15 +51,17 @@ export default function ProgressBar({ status }) {
     }
   }, [status]);
 
+  const stageElapsedMs = status && stageStartRef.current ? now - stageStartRef.current : 0;
+  const totalElapsedSec = status && startedAtRef.current ? (now - startedAtRef.current) / 1000 : 0;
+  const rawPercent = status ? computePercent(status, { stageElapsedMs }) : 0;
+  const percent = monotonicPercent(rawPercent, maxPercentRef.current);
+
+  useEffect(() => {
+    maxPercentRef.current = percent;
+  }, [percent]);
+
   if (!status) return null;
   const { stage, message } = status;
-
-  const stageElapsedMs = stageStartRef.current ? now - stageStartRef.current : 0;
-  const totalElapsedSec = startedAtRef.current ? (now - startedAtRef.current) / 1000 : 0;
-
-  const rawPercent = computePercent(status, { stageElapsedMs });
-  const percent = monotonicPercent(rawPercent, maxPercentRef.current);
-  maxPercentRef.current = percent;
 
   const etaSec = stage === "cancelled" || stage === "error" ? null : computeEtaSec(status, { stageElapsedMs });
   const step = STEP_INDEX[stage] || 0;

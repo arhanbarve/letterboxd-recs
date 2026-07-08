@@ -51,6 +51,17 @@ describe("computePercent", () => {
     const pct = computePercent({ stage: "scoring", current: 0, total: 100 }, { stageElapsedMs: 0 });
     expect(pct).toBeGreaterThanOrEqual(floor);
   });
+
+  it("stays in the creep path (no NaN/throw) when total is exactly 0", () => {
+    const pct = computePercent({ stage: "scoring", current: 0, total: 0 }, { stageElapsedMs: 1000 });
+    expect(Number.isFinite(pct)).toBe(true);
+  });
+
+  it("never drops below the stage floor even with negative stageElapsedMs", () => {
+    const [floor] = STAGE_BANDS.scraping;
+    const pct = computePercent({ stage: "scraping", current: 0, total: null }, { stageElapsedMs: -1000 });
+    expect(pct).toBeGreaterThanOrEqual(floor);
+  });
 });
 
 describe("monotonicPercent", () => {
