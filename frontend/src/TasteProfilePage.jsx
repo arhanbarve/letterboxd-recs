@@ -112,10 +112,12 @@ export default function TasteProfilePage({ username }) {
     return (
       <div>
         {isRunning && <ProgressBar />}
-        <div className="empty-state">
-          <h3>No taste profile yet</h3>
-          <p>Refresh your data from the Recommendations tab to build your taste profile.</p>
-        </div>
+        {!isRunning && (
+          <div className="empty-state">
+            <h3>No taste profile yet</h3>
+            <p>Refresh your data from the Recommendations tab to build your taste profile.</p>
+          </div>
+        )}
       </div>
     );
   }
