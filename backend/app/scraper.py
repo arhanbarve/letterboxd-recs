@@ -121,8 +121,8 @@ def default_get(url: str, on_request=None) -> str:
         if wait:
             time.sleep(wait)
         context = browser.new_context(user_agent=USER_AGENT, locale="en-US")
-        page = context.new_page()
         try:
+            page = context.new_page()
             t0 = time.monotonic()
             resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(2500)

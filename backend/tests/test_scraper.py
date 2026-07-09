@@ -190,6 +190,29 @@ def test_default_get_blocked_error_names_the_export_escape_hatch(monkeypatch):
     with pytest.raises(RuntimeError, match="Letterboxd export"):
         scraper.default_get("https://letterboxd.com/alice/films/")
 
+def test_default_get_closes_context_if_new_page_raises(monkeypatch):
+    # page creation can fail (browser process disconnected, etc.) — the
+    # context must still be closed, not leaked.
+    class _ExplodingContext:
+        def __init__(self, browser):
+            self._browser = browser
+        def new_page(self):
+            raise RuntimeError("page creation failed")
+        def close(self):
+            self._browser.contexts_closed += 1
+
+    fb = _FakeBrowser([200])
+    def new_context(**kwargs):
+        fb.context_kwargs.append(kwargs)
+        return _ExplodingContext(fb)
+    monkeypatch.setattr(fb, "new_context", new_context)
+    monkeypatch.setattr(scraper, "_get_browser", lambda: fb)
+    monkeypatch.setattr(scraper.time, "sleep", lambda s: None)
+
+    with pytest.raises(RuntimeError, match="page creation failed"):
+        scraper.default_get("https://letterboxd.com/alice/films/")
+    assert fb.contexts_closed == 1
+
 from app.scraper import parse_declared_film_count
 
 def test_parse_declared_film_count_strips_thousands_comma():
