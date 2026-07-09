@@ -1,6 +1,7 @@
 import dataclasses
 import json
 import threading
+import time
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +29,11 @@ def _real_refresh(conn, username=None, on_progress=None, cancel_event=None):
     if username:
         cfg = dataclasses.replace(cfg, username=username)
 
+    def detail_fn(slug):
+        tid = parse_tmdb_id(default_get(f"{BASE}/film/{slug}/"))
+        time.sleep(1.0)  # pace the capped Letterboxd fallback — see resolver.MAX_DETAIL_FALLBACKS
+        return tid
+
     def scrape(user, on_progress=None, should_cancel=None):
         rss_xml = fetch_rss(user, get_html=default_get)
         resolve_ids = make_resolver(
@@ -35,7 +41,7 @@ def _real_refresh(conn, username=None, on_progress=None, cancel_event=None):
             cache_put=lambda slug, tid, via: store_slug_tmdb(conn, slug, tid, via),
             rss_map=parse_rss_tmdb_map(rss_xml) if rss_xml else {},
             search_fn=lambda title, year: search_movie(title, year, cfg.tmdb_api_key),
-            detail_fn=lambda slug: parse_tmdb_id(default_get(f"{BASE}/film/{slug}/")),
+            detail_fn=detail_fn,
         )
         return scrape_profile(user, on_progress=on_progress,
                               should_cancel=should_cancel, resolve_ids=resolve_ids)
