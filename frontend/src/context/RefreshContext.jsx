@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { refresh, getRefreshStatus, cancelRefresh } from "../api";
+import { refresh, getRefreshStatus, cancelRefresh, uploadExport } from "../api";
 
 const ACTIVE_STAGES = new Set(["starting", "scraping", "enriching", "profiling", "scoring"]);
 const TERMINAL_STAGES = new Set(["done", "cancelled", "error"]);
@@ -122,6 +122,25 @@ export function RefreshProvider({ username, children }) {
     return res;
   }, [username, applyStatus, startPolling]);
 
+  const startFromUpload = useCallback(async (file) => {
+    if (!username) return { status: "no_username" };
+    applyStatus({ stage: "starting", current: 0, total: null, message: "Importing your Letterboxd export..." });
+    let res;
+    try {
+      res = await uploadExport(username, file);
+    } catch {
+      applyStatus({ stage: "error", current: 0, total: null, message: "Couldn't reach the backend to import the export. Is it running?" });
+      return { status: "error" };
+    }
+    if (res.status === "started" || res.status === "already_running") {
+      startPolling(username);
+    } else {
+      // 400s come back as {detail: "..."}
+      applyStatus({ stage: "error", current: 0, total: null, message: res.detail || "Couldn't read that export file." });
+    }
+    return res;
+  }, [username, applyStatus, startPolling]);
+
   const cancel = useCallback(async () => {
     if (!username) return;
     try {
@@ -134,7 +153,7 @@ export function RefreshProvider({ username, children }) {
   const isRunning = !!status && ACTIVE_STAGES.has(status.stage);
 
   return (
-    <RefreshContext.Provider value={{ status, isRunning, start, cancel, lastCompletedAt, timing }}>
+    <RefreshContext.Provider value={{ status, isRunning, start, startFromUpload, cancel, lastCompletedAt, timing }}>
       {children}
     </RefreshContext.Provider>
   );
