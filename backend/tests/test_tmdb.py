@@ -1,5 +1,5 @@
 import responses
-from app.tmdb import enrich, related_ids, watch_providers, search_person, discover_by_person
+from app.tmdb import enrich, related_ids, watch_providers, search_person, discover_by_person, search_movie
 
 @responses.activate
 def test_enrich_normalizes_movie():
@@ -142,3 +142,39 @@ def test_discover_by_person_returns_movie_ids():
         status=200,
     )
     assert discover_by_person(1032, "key", session=None) == [769, 103]
+
+SEARCH_URL = "https://api.themoviedb.org/3/search/movie"
+
+@responses.activate
+def test_search_movie_exact_title_and_year_match():
+    responses.add(responses.GET, SEARCH_URL, json={"results": [
+        {"id": 11, "title": "The Thing", "release_date": "2011-10-14"},
+        {"id": 42, "title": "The Thing", "release_date": "1982-06-25"},
+    ]})
+    assert search_movie("the thing", 1982, "KEY") == 42
+
+@responses.activate
+def test_search_movie_falls_back_to_year_only_match():
+    responses.add(responses.GET, SEARCH_URL, json={"results": [
+        {"id": 7, "title": "Parasite: Special Edition", "release_date": "2019-05-30"},
+    ]})
+    assert search_movie("Parasite", 2019, "KEY") == 7
+
+@responses.activate
+def test_search_movie_no_match_returns_none():
+    responses.add(responses.GET, SEARCH_URL, json={"results": [
+        {"id": 7, "title": "Wrong Film", "release_date": "1999-01-01"},
+    ]})
+    assert search_movie("Parasite", 2019, "KEY") is None
+
+@responses.activate
+def test_search_movie_without_year_requires_exact_title():
+    responses.add(responses.GET, SEARCH_URL, json={"results": [
+        {"id": 7, "title": "Parasite", "release_date": "2019-05-30"},
+    ]})
+    assert search_movie("parasite", None, "KEY") == 7
+
+@responses.activate
+def test_search_movie_empty_results_returns_none():
+    responses.add(responses.GET, SEARCH_URL, json={"results": []})
+    assert search_movie("Nothing", 2020, "KEY") is None

@@ -84,3 +84,26 @@ def related_ids(tmdb_id: int, api_key: str, session=None, pages: int = 1) -> lis
             if page >= data.get("total_pages", 1):
                 break
     return ids
+
+def search_movie(title: str, year: int | None, api_key: str, session=None) -> int | None:
+    """Resolve a TMDB id from title+year. Exact title (+year) wins; else any
+    result with a matching year; else None (caller falls through to the next
+    resolution layer)."""
+    params = {"api_key": api_key, "query": title}
+    if year:
+        params["primary_release_year"] = year
+    data = _get(session, f"{API}/search/movie", params)
+    results = data.get("results", [])
+
+    def _year(r):
+        rd = r.get("release_date") or ""
+        return int(rd[:4]) if len(rd) >= 4 and rd[:4].isdigit() else None
+
+    for r in results:
+        if r.get("title", "").lower() == title.lower() and (year is None or _year(r) == year):
+            return r["id"]
+    if year is not None:
+        for r in results:
+            if _year(r) == year:
+                return r["id"]
+    return None
