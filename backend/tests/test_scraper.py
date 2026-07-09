@@ -32,6 +32,17 @@ def test_parse_films_page_handles_item_name_without_year():
     assert entries[0]["title"] == "Some Film"
     assert entries[0]["year"] is None
 
+def test_parse_films_page_falls_back_to_alt_when_no_item_name():
+    html = '''<html><body><ul class="grid">
+      <li class="griditem">
+        <div data-item-slug="alt-only-film">
+          <img class="image" alt="Alt Only Film"/>
+        </div>
+      </li></ul></body></html>'''
+    entries = parse_films_page(html)
+    assert entries[0]["title"] == "Alt Only Film"
+    assert entries[0]["year"] is None
+
 def test_parse_films_page_finds_next_page():
     html = (FIX / "films_page.html").read_text()
     assert parse_next_page_url(html) == "/alice/films/page/2/"
