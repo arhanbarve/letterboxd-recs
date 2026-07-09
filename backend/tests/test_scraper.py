@@ -181,13 +181,43 @@ def test_default_get_closes_every_context_even_when_blocked(monkeypatch):
     assert fb.contexts_closed == 4
 
 def test_default_get_context_sends_ua_and_locale(monkeypatch):
+    monkeypatch.delenv("SCRAPER_PROXY_SERVER", raising=False)
     fb = _install_fake_browser(monkeypatch, [200])
     scraper.default_get("https://letterboxd.com/alice/films/")
     assert fb.context_kwargs[0] == {"user_agent": scraper.USER_AGENT, "locale": "en-US"}
 
-def test_default_get_blocked_error_names_the_export_escape_hatch(monkeypatch):
+def test_default_get_uses_proxy_when_configured(monkeypatch):
+    monkeypatch.setenv("SCRAPER_PROXY_SERVER", "http://proxy.example.com:8000")
+    monkeypatch.setenv("SCRAPER_PROXY_USERNAME", "proxyuser")
+    monkeypatch.setenv("SCRAPER_PROXY_PASSWORD", "proxypass")
+    fb = _install_fake_browser(monkeypatch, [200])
+    scraper.default_get("https://letterboxd.com/alice/films/")
+    assert fb.context_kwargs[0] == {
+        "user_agent": scraper.USER_AGENT, "locale": "en-US",
+        "proxy": {"server": "http://proxy.example.com:8000",
+                  "username": "proxyuser", "password": "proxypass"},
+    }
+
+def test_default_get_proxy_without_credentials_omits_them(monkeypatch):
+    monkeypatch.setenv("SCRAPER_PROXY_SERVER", "http://proxy.example.com:8000")
+    monkeypatch.delenv("SCRAPER_PROXY_USERNAME", raising=False)
+    monkeypatch.delenv("SCRAPER_PROXY_PASSWORD", raising=False)
+    fb = _install_fake_browser(monkeypatch, [200])
+    scraper.default_get("https://letterboxd.com/alice/films/")
+    assert fb.context_kwargs[0]["proxy"] == {"server": "http://proxy.example.com:8000"}
+
+def test_default_get_new_context_per_attempt_uses_fresh_proxy_config(monkeypatch):
+    # each retry re-reads env so a proxy rotation/health-check between
+    # attempts (e.g. a supervisor swapping SCRAPER_PROXY_SERVER) takes effect
+    monkeypatch.setenv("SCRAPER_PROXY_SERVER", "http://proxy.example.com:8000")
+    fb = _install_fake_browser(monkeypatch, [429, 200])
+    scraper.default_get("https://letterboxd.com/alice/films/")
+    assert len(fb.context_kwargs) == 2
+    assert all("proxy" in kw for kw in fb.context_kwargs)
+
+def test_default_get_blocked_error_suggests_retrying(monkeypatch):
     _install_fake_browser(monkeypatch, [403, 403, 403, 403], content="x")
-    with pytest.raises(RuntimeError, match="Letterboxd export"):
+    with pytest.raises(RuntimeError, match="try again in a minute"):
         scraper.default_get("https://letterboxd.com/alice/films/")
 
 def test_default_get_closes_context_if_new_page_raises(monkeypatch):
@@ -323,7 +353,7 @@ def test_scrape_profile_drops_films_the_resolver_could_not_resolve():
     films = scrape_profile("alice", fake_get, delay=0, resolve_ids=resolve_ids)
     assert [f["slug"] for f in films] == ["parasite"]
 
-def test_incomplete_scrape_error_mentions_export_import():
+def test_incomplete_scrape_error_suggests_retrying():
     page1 = (FIX / "films_page.html").read_text()
     page2 = '<html><body></body></html>'
     stats = '<html><body><h4 class="profile-statistic"><a href="/alice/films/"><span class="value">87</span></a></h4></body></html>'
@@ -336,5 +366,5 @@ def test_incomplete_scrape_error_mentions_export_import():
     def resolve_ids(entries, on_progress=None, should_cancel=None):
         for e in entries:
             e["tmdb_id"] = 1
-    with pytest.raises(RuntimeError, match="Letterboxd export"):
+    with pytest.raises(RuntimeError, match="try refreshing again"):
         scrape_profile("alice", fake_get, delay=0, resolve_ids=resolve_ids)

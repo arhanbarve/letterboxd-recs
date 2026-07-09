@@ -1,3 +1,4 @@
+import os
 import re
 import threading
 import time
@@ -76,6 +77,25 @@ USER_AGENT = (
 
 _thread_local = threading.local()
 
+def _proxy_config():
+    """Cloudflare's bot score weighs source-IP reputation heavily — a
+    datacenter/PaaS IP (e.g. Railway) gets treated with suspicion regardless
+    of session freshness, unlike a residential IP (confirmed live 2026-07-09:
+    identical code, same moment, home IP passed clean while the deployed
+    backend's IP 403'd deterministically). Routing through a residential
+    proxy is the fix; unset SCRAPER_PROXY_SERVER to disable."""
+    server = os.environ.get("SCRAPER_PROXY_SERVER")
+    if not server:
+        return None
+    proxy = {"server": server}
+    username = os.environ.get("SCRAPER_PROXY_USERNAME")
+    password = os.environ.get("SCRAPER_PROXY_PASSWORD")
+    if username:
+        proxy["username"] = username
+    if password:
+        proxy["password"] = password
+    return proxy
+
 def _get_browser():
     """Lazily creates one Playwright browser per thread. Letterboxd sits
     behind Cloudflare bot-management; plain HTTP clients (requests,
@@ -120,7 +140,11 @@ def default_get(url: str, on_request=None) -> str:
     for attempt, wait in enumerate([0] + backoffs):
         if wait:
             time.sleep(wait)
-        context = browser.new_context(user_agent=USER_AGENT, locale="en-US")
+        context_kwargs = {"user_agent": USER_AGENT, "locale": "en-US"}
+        proxy = _proxy_config()
+        if proxy:
+            context_kwargs["proxy"] = proxy
+        context = browser.new_context(**context_kwargs)
         try:
             page = context.new_page()
             t0 = time.monotonic()
@@ -139,8 +163,7 @@ def default_get(url: str, on_request=None) -> str:
     raise RuntimeError(
         f"Blocked fetching {url}: status {last_status} after {len(backoffs)} "
         f"retries. Letterboxd's bot protection refused the crawl — try again "
-        f"in a minute, or import your Letterboxd export "
-        f"(letterboxd.com Settings → Data → Export) instead."
+        f"in a minute."
     )
 
 def crawl_films_list(username, get_html=default_get, delay: float = 1.0, should_cancel=None) -> list[dict]:
@@ -190,8 +213,7 @@ def scrape_profile(
             raise RuntimeError(
                 f"Incomplete scrape: found {len(entries)} films but {username}'s "
                 f"Letterboxd profile reports {declared}. The crawl was likely "
-                f"blocked partway through — try refreshing again, or import your "
-                f"Letterboxd export (Settings → Data → Export) instead."
+                f"blocked partway through — try refreshing again in a minute."
             )
         return films
     finally:
