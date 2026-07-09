@@ -76,22 +76,20 @@ USER_AGENT = (
 
 _thread_local = threading.local()
 
-def _get_page():
-    """Lazily creates one Playwright browser page per thread. Letterboxd sits
-    behind Cloudflare bot-management (JS challenge); plain HTTP clients
-    (requests, cloudscraper) get walled off, but a real browser engine passes
-    it like any other visitor."""
-    if not hasattr(_thread_local, "page"):
+def _get_browser():
+    """Lazily creates one Playwright browser per thread. Letterboxd sits
+    behind Cloudflare bot-management; plain HTTP clients (requests,
+    cloudscraper) are refused outright on pagination URLs (TLS fingerprint —
+    confirmed live 2026-07-09), but a real browser engine passes. Contexts are
+    deliberately NOT cached here — see default_get."""
+    if not hasattr(_thread_local, "browser"):
         from playwright.sync_api import sync_playwright
         pw = sync_playwright().start()
-        browser = pw.chromium.launch(headless=True)
-        page = browser.new_page(user_agent=USER_AGENT)
         _thread_local.pw = pw
-        _thread_local.browser = browser
-        _thread_local.page = page
-    return _thread_local.page
+        _thread_local.browser = pw.chromium.launch(headless=True)
+    return _thread_local.browser
 
-def _close_page():
+def _close_browser():
     # Swallow close/stop errors so teardown never masks the exception that
     # triggered it (e.g. a Cancelled propagating through this finally block).
     if hasattr(_thread_local, "browser"):
@@ -103,35 +101,46 @@ def _close_page():
             _thread_local.pw.stop()
         except Exception:
             pass
-        del _thread_local.page
         del _thread_local.browser
         del _thread_local.pw
 
 def default_get(url: str, on_request=None) -> str:
-    # Known limitation: profiles with >~72 rated films 403 on films-page 2.
-    # Confirmed live (see docs/superpowers/plans/2026-07-08-refresh-and-progress-overhaul-plan.md,
-    # Task 0) that pacing/jitter, wider backoff, click-driven pagination, stealth
-    # patching, and browser-context rotation all fail identically at the same
-    # request count — this is Cloudflare rate-limiting by source IP, not fixable
-    # client-side. `on_request` lets a future investigation re-instrument cheaply.
-    page = _get_page()
+    # Cloudflare keys its bot verdict to the browser session's cookie jar —
+    # not to the source IP and not to a request count. The first navigation in
+    # a fresh context gets a grace pass while telemetry is collected; once the
+    # (headless) session is flagged, every later navigation to a protected
+    # path (profile pagination) 403s on that session, so retrying on the same
+    # context is guaranteed futile. Confirmed live 2026-07-09 — see
+    # docs/superpowers/specs/2026-07-09-scraper-cloudflare-resilience-design.md.
+    # Therefore: one fresh context per attempt; a flagged session is never
+    # reused. `on_request` lets investigations re-instrument cheaply.
+    browser = _get_browser()
     backoffs = [2, 5, 10]
     last_status = None
     for attempt, wait in enumerate([0] + backoffs):
         if wait:
             time.sleep(wait)
-        t0 = time.monotonic()
-        resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(2500)
-        dt = time.monotonic() - t0
-        last_status = resp.status
-        if on_request:
-            challenged = "Just a moment" in page.content() or "cf-browser-verification" in page.content()
-            on_request({"url": url, "status": last_status, "attempt": attempt, "elapsed_s": round(dt, 2), "challenged": challenged})
-        if last_status not in (403, 429):
-            return page.content()
+        context = browser.new_context(user_agent=USER_AGENT, locale="en-US")
+        page = context.new_page()
+        try:
+            t0 = time.monotonic()
+            resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(2500)
+            dt = time.monotonic() - t0
+            last_status = resp.status
+            body = page.content()
+            if on_request:
+                challenged = "Just a moment" in body or "cf-browser-verification" in body
+                on_request({"url": url, "status": last_status, "attempt": attempt, "elapsed_s": round(dt, 2), "challenged": challenged})
+            if last_status not in (403, 429):
+                return body
+        finally:
+            context.close()
     raise RuntimeError(
-        f"Blocked fetching {url}: status {last_status} after {len(backoffs)} retries"
+        f"Blocked fetching {url}: status {last_status} after {len(backoffs)} "
+        f"retries. Letterboxd's bot protection refused the crawl — try again "
+        f"in a minute, or import your Letterboxd export "
+        f"(letterboxd.com Settings → Data → Export) instead."
     )
 
 def crawl_films_list(username, get_html=default_get, delay: float = 1.0, should_cancel=None) -> list[dict]:
@@ -186,4 +195,4 @@ def scrape_profile(
             )
         return films
     finally:
-        _close_page()
+        _close_browser()

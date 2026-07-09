@@ -107,40 +107,88 @@ class _FakeResp:
         self.status = status
 
 class _FakePage:
-    def __init__(self, statuses, content="<html>ok</html>"):
-        self._statuses = list(statuses)
-        self._content = content
+    def __init__(self, browser):
+        self._browser = browser
     def goto(self, url, wait_until=None, timeout=None):
-        return _FakeResp(self._statuses.pop(0))
+        return _FakeResp(self._browser._statuses.pop(0))
     def wait_for_timeout(self, ms):
         pass
     def content(self):
-        return self._content
+        return self._browser._content
+
+class _FakeContext:
+    def __init__(self, browser):
+        self._browser = browser
+    def new_page(self):
+        return _FakePage(self._browser)
+    def close(self):
+        self._browser.contexts_closed += 1
+
+class _FakeBrowser:
+    """One goto() pops one status; tracks context lifecycle."""
+    def __init__(self, statuses, content="<html>ok</html>"):
+        self._statuses = list(statuses)
+        self._content = content
+        self.context_kwargs = []
+        self.contexts_closed = 0
+    @property
+    def contexts_opened(self):
+        return len(self.context_kwargs)
+    def new_context(self, **kwargs):
+        self.context_kwargs.append(kwargs)
+        return _FakeContext(self)
+
+def _install_fake_browser(monkeypatch, statuses, content="<html>ok</html>"):
+    fb = _FakeBrowser(statuses, content)
+    monkeypatch.setattr(scraper, "_get_browser", lambda: fb)
+    monkeypatch.setattr(scraper.time, "sleep", lambda s: None)
+    return fb
 
 def test_default_get_returns_content_on_first_success(monkeypatch):
-    monkeypatch.setattr(scraper, "_get_page", lambda: _FakePage([200]))
-    monkeypatch.setattr(scraper.time, "sleep", lambda s: None)
+    _install_fake_browser(monkeypatch, [200])
     assert scraper.default_get("https://letterboxd.com/alice/films/") == "<html>ok</html>"
 
 def test_default_get_raises_after_exhausting_retries_on_403(monkeypatch):
-    monkeypatch.setattr(scraper, "_get_page", lambda: _FakePage([403, 403, 403, 403], content="<html>challenge</html>"))
-    monkeypatch.setattr(scraper.time, "sleep", lambda s: None)
+    _install_fake_browser(monkeypatch, [403, 403, 403, 403], content="<html>challenge</html>")
     with pytest.raises(RuntimeError, match="Blocked"):
         scraper.default_get("https://letterboxd.com/alice/films/")
 
 def test_default_get_recovers_after_one_retry(monkeypatch):
-    monkeypatch.setattr(scraper, "_get_page", lambda: _FakePage([429, 200]))
-    monkeypatch.setattr(scraper.time, "sleep", lambda s: None)
+    _install_fake_browser(monkeypatch, [429, 200])
     assert scraper.default_get("https://letterboxd.com/alice/films/") == "<html>ok</html>"
 
 def test_default_get_reports_each_attempt_via_on_request(monkeypatch):
-    monkeypatch.setattr(scraper, "_get_page", lambda: _FakePage([429, 200]))
-    monkeypatch.setattr(scraper.time, "sleep", lambda s: None)
+    _install_fake_browser(monkeypatch, [429, 200])
     events = []
     scraper.default_get("https://letterboxd.com/alice/films/", on_request=events.append)
     assert [e["status"] for e in events] == [429, 200]
     assert [e["attempt"] for e in events] == [0, 1]
     assert all(e["challenged"] is False for e in events)
+
+def test_default_get_opens_and_closes_fresh_context_per_attempt(monkeypatch):
+    # THE fix: a Cloudflare-flagged session must never be reused, so every
+    # attempt (not just every call) gets its own context — and closes it.
+    fb = _install_fake_browser(monkeypatch, [429, 200])
+    scraper.default_get("https://letterboxd.com/alice/films/")
+    assert fb.contexts_opened == 2
+    assert fb.contexts_closed == 2
+
+def test_default_get_closes_every_context_even_when_blocked(monkeypatch):
+    fb = _install_fake_browser(monkeypatch, [403, 403, 403, 403], content="x")
+    with pytest.raises(RuntimeError):
+        scraper.default_get("https://letterboxd.com/alice/films/")
+    assert fb.contexts_opened == 4
+    assert fb.contexts_closed == 4
+
+def test_default_get_context_sends_ua_and_locale(monkeypatch):
+    fb = _install_fake_browser(monkeypatch, [200])
+    scraper.default_get("https://letterboxd.com/alice/films/")
+    assert fb.context_kwargs[0] == {"user_agent": scraper.USER_AGENT, "locale": "en-US"}
+
+def test_default_get_blocked_error_names_the_export_escape_hatch(monkeypatch):
+    _install_fake_browser(monkeypatch, [403, 403, 403, 403], content="x")
+    with pytest.raises(RuntimeError, match="Letterboxd export"):
+        scraper.default_get("https://letterboxd.com/alice/films/")
 
 from app.scraper import parse_declared_film_count
 
@@ -181,10 +229,9 @@ def test_scrape_profile_closes_browser_on_cancel():
     class _FakePw:
         def stop(self):
             closed["pw"] = True
-    # Set directly (not via monkeypatch): _close_page deletes these attrs as
+    # Set directly (not via monkeypatch): _close_browser deletes these attrs as
     # part of normal teardown, which would conflict with monkeypatch's own
     # delattr-on-undo when it recorded no prior value.
-    scraper._thread_local.page = object()
     scraper._thread_local.browser = _FakeBrowser()
     scraper._thread_local.pw = _FakePw()
 
@@ -201,7 +248,6 @@ def test_scrape_profile_raises_cancelled_even_if_browser_close_fails():
     class _FakePw:
         def stop(self):
             raise RuntimeError("pw already stopped")
-    scraper._thread_local.page = object()
     scraper._thread_local.browser = _FakeBrowser()
     scraper._thread_local.pw = _FakePw()
 
