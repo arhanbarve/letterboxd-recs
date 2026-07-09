@@ -14,6 +14,24 @@ def test_parse_films_page_extracts_slug_title_rating():
     # unrated film present but rating is None
     assert by_slug["unrated-film"]["rating"] is None
 
+def test_parse_films_page_extracts_year_from_item_name():
+    html = (FIX / "films_page.html").read_text()
+    by_slug = {e["slug"]: e for e in parse_films_page(html)}
+    assert by_slug["parasite"]["year"] == 2019
+    assert by_slug["parasite"]["title"] == "Parasite"
+    assert by_slug["cats"]["year"] == 2019
+
+def test_parse_films_page_handles_item_name_without_year():
+    html = '''<html><body><ul class="grid">
+      <li class="griditem">
+        <div data-item-name="Some Film" data-item-slug="some-film" data-item-link="/film/some-film/">
+          <img class="image" alt="Some Film"/>
+        </div>
+      </li></ul></body></html>'''
+    entries = parse_films_page(html)
+    assert entries[0]["title"] == "Some Film"
+    assert entries[0]["year"] is None
+
 def test_parse_films_page_finds_next_page():
     html = (FIX / "films_page.html").read_text()
     assert parse_next_page_url(html) == "/alice/films/page/2/"

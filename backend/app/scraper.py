@@ -14,6 +14,16 @@ def _rating_from_class(rating_span) -> float | None:
             return int(cls.split("-")[1]) / 2.0
     return None
 
+_NAME_YEAR_RE = re.compile(r"^(.*?)\s+\((\d{4})\)$")
+
+def _split_item_name(name: str | None) -> tuple[str | None, int | None]:
+    if not name:
+        return None, None
+    m = _NAME_YEAR_RE.match(name)
+    if m:
+        return m.group(1), int(m.group(2))
+    return name, None
+
 def parse_films_page(html: str) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
     entries = []
@@ -22,9 +32,13 @@ def parse_films_page(html: str) -> list[dict]:
         if poster is None:
             continue
         img = poster.select_one("img")
+        title, year = _split_item_name(poster.get("data-item-name"))
+        if title is None:
+            title = img.get("alt") if img else None
         entries.append({
             "slug": poster.get("data-item-slug"),
-            "title": img.get("alt") if img else None,
+            "title": title,
+            "year": year,
             "rating": _rating_from_class(li.select_one("span.rating")),
         })
     return entries
