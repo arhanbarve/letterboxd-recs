@@ -224,3 +224,43 @@ def test_cancel_event_cleared_when_new_run_starts(tmp_path):
     client.post("/api/refresh", json={"username": "alice"})
     _wait_until(lambda: len(seen_cancel_states) == 2)
     assert seen_cancel_states[1] is False  # fresh event for the new run, not the old cancelled one
+
+def test_real_refresh_builds_cascade_and_scrapes_without_detail_pages(monkeypatch, tmp_path):
+    """_real_refresh must inject a resolve_ids cascade into scrape_profile:
+    cache + rss + search + detail. We stub every network layer and assert the
+    scrape resolves via rss/search and persists to the slug cache."""
+    import app.api as api_mod
+    from app.config import Config
+    from app.db import connect, init_schema, lookup_slug_tmdb
+
+    conn = connect(":memory:")
+    init_schema(conn)
+
+    monkeypatch.setattr(api_mod, "load_config", lambda: Config(
+        username="alice", tmdb_api_key="KEY", db_path=str(tmp_path / "x.db")))
+    monkeypatch.setattr(api_mod, "fetch_rss", lambda user, get_html=None: "<rss/>")
+    monkeypatch.setattr(api_mod, "parse_rss_tmdb_map", lambda xml: {"parasite": 496243})
+    monkeypatch.setattr(api_mod, "search_movie", lambda title, year, key: 555)
+
+    captured = {}
+    def fake_scrape_profile(user, get_html=None, delay=1.0, on_progress=None,
+                            should_cancel=None, resolve_ids=None):
+        entries = [
+            {"slug": "parasite", "title": "Parasite", "year": 2019, "rating": 5.0},
+            {"slug": "cats", "title": "Cats", "year": 2019, "rating": 1.0},
+        ]
+        resolve_ids(entries, on_progress=on_progress, should_cancel=should_cancel)
+        captured["entries"] = entries
+        return [e for e in entries if e["tmdb_id"] is not None]
+    monkeypatch.setattr(api_mod, "scrape_profile", fake_scrape_profile)
+
+    def fake_run_refresh(conn_, cfg, deps, on_progress=None, cancel_event=None):
+        deps.scrape_fn(cfg.username, on_progress=None, should_cancel=None)
+    monkeypatch.setattr(api_mod, "run_refresh", fake_run_refresh)
+
+    api_mod._real_refresh(conn, "alice")
+
+    by_slug = {e["slug"]: e for e in captured["entries"]}
+    assert by_slug["parasite"]["tmdb_id"] == 496243   # via rss
+    assert by_slug["cats"]["tmdb_id"] == 555          # via search
+    assert lookup_slug_tmdb(conn, "cats") == (555,)   # persisted to cache

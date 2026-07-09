@@ -6,11 +6,14 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import load_config
-from app.db import connect, init_schema
+from app.db import connect, init_schema, lookup_slug_tmdb, store_slug_tmdb
 from app.errors import Cancelled
 from app.pipeline import run_refresh, Deps
-from app.scraper import scrape_profile
-from app.tmdb import enrich, related_ids, watch_providers, search_person, discover_by_person
+from app.resolver import make_resolver
+from app.rss import fetch_rss, parse_rss_tmdb_map
+from app.scraper import BASE, default_get, parse_tmdb_id, scrape_profile
+from app.tmdb import (enrich, related_ids, search_movie, watch_providers,
+                      search_person, discover_by_person)
 from app.taste_dashboard import build_dashboard
 
 class RefreshRequest(BaseModel):
@@ -24,9 +27,21 @@ def _real_refresh(conn, username=None, on_progress=None, cancel_event=None):
     cfg = load_config()
     if username:
         cfg = dataclasses.replace(cfg, username=username)
+
+    def scrape(user, on_progress=None, should_cancel=None):
+        rss_xml = fetch_rss(user, get_html=default_get)
+        resolve_ids = make_resolver(
+            cache_get=lambda slug: lookup_slug_tmdb(conn, slug),
+            cache_put=lambda slug, tid, via: store_slug_tmdb(conn, slug, tid, via),
+            rss_map=parse_rss_tmdb_map(rss_xml) if rss_xml else {},
+            search_fn=lambda title, year: search_movie(title, year, cfg.tmdb_api_key),
+            detail_fn=lambda slug: parse_tmdb_id(default_get(f"{BASE}/film/{slug}/")),
+        )
+        return scrape_profile(user, on_progress=on_progress,
+                              should_cancel=should_cancel, resolve_ids=resolve_ids)
+
     deps = Deps(
-        scrape_fn=lambda user, on_progress=None, should_cancel=None: scrape_profile(
-            user, on_progress=on_progress, should_cancel=should_cancel),
+        scrape_fn=scrape,
         enrich_fn=lambda tid, key: enrich(tid, key),
         related_fn=lambda tid, key: related_ids(tid, key, pages=3),
         person_search_fn=lambda name, key: search_person(name, key),
