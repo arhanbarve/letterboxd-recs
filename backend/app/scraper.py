@@ -5,6 +5,7 @@ import time
 from bs4 import BeautifulSoup
 
 from app.errors import Cancelled
+from app.resolver import make_resolver
 
 def _rating_from_class(rating_span) -> float | None:
     if rating_span is None:
@@ -133,43 +134,55 @@ def default_get(url: str, on_request=None) -> str:
         f"Blocked fetching {url}: status {last_status} after {len(backoffs)} retries"
     )
 
-def scrape_profile(
-    username: str, get_html=default_get, delay: float = 1.0, on_progress=None, should_cancel=None
-) -> list[dict]:
-    films = []
-    total_seen = 0
+def crawl_films_list(username, get_html=default_get, delay: float = 1.0, should_cancel=None) -> list[dict]:
+    """Fetch only the paginated films-LIST pages (72 films each) — the entire
+    Letterboxd HTML crawl on the happy path. TMDB ids come from the resolver
+    cascade afterwards, not from per-film detail pages (which is what used to
+    blow the ~72-request Cloudflare budget and 403 every >72-film profile)."""
+    entries = []
     url = f"{BASE}/{username}/films/"
+    while url:
+        if should_cancel and should_cancel():
+            raise Cancelled()
+        html = get_html(url)
+        entries.extend(parse_films_page(html))
+        nxt = parse_next_page_url(html)
+        url = f"{BASE}{nxt}" if nxt else None
+        if url and delay:
+            time.sleep(delay)
+    return entries
+
+def scrape_profile(
+    username: str, get_html=default_get, delay: float = 1.0,
+    on_progress=None, should_cancel=None, resolve_ids=None,
+) -> list[dict]:
     try:
-        while url:
-            if should_cancel and should_cancel():
-                raise Cancelled()
-            html = get_html(url)
-            page_entries = parse_films_page(html)
-            total_seen += len(page_entries)
-            for entry in page_entries:
-                if should_cancel and should_cancel():
-                    raise Cancelled()
-                detail = get_html(f"{BASE}/film/{entry['slug']}/")
-                entry["tmdb_id"] = parse_tmdb_id(detail)
-                # Films Letterboxd can't link to TMDB can never be produced as a
-                # recommendation candidate (candidates always come from TMDB), so
-                # they're safe to drop here — nothing to exclude them from.
-                if entry["tmdb_id"] is not None:
-                    films.append(entry)
-                if on_progress:
-                    on_progress(len(films))
+        entries = crawl_films_list(username, get_html, delay=delay, should_cancel=should_cancel)
+
+        if resolve_ids is None:
+            # Standalone/legacy mode: detail-page-only cascade. The live API path
+            # always injects the full cache->rss->search->detail cascade instead.
+            def detail_fn(slug):
+                html = get_html(f"{BASE}/film/{slug}/")
                 if delay:
                     time.sleep(delay)
-            nxt = parse_next_page_url(html)
-            url = f"{BASE}{nxt}" if nxt else None
+                return parse_tmdb_id(html)
+            resolve_ids = make_resolver(detail_fn=detail_fn, max_detail=len(entries))
+
+        resolve_ids(entries, on_progress=on_progress, should_cancel=should_cancel)
+
+        # Films without a TMDB id can never be produced as recommendation
+        # candidates (candidates always come from TMDB), so they're safe to drop.
+        films = [e for e in entries if e.get("tmdb_id") is not None]
 
         profile_html = get_html(f"{BASE}/{username}/")
         declared = parse_declared_film_count(profile_html)
-        if declared is not None and total_seen < declared:
+        if declared is not None and len(entries) < declared:
             raise RuntimeError(
-                f"Incomplete scrape: found {total_seen} films but {username}'s "
+                f"Incomplete scrape: found {len(entries)} films but {username}'s "
                 f"Letterboxd profile reports {declared}. The crawl was likely "
-                f"blocked partway through — try refreshing again."
+                f"blocked partway through — try refreshing again, or import your "
+                f"Letterboxd export (Settings → Data → Export) instead."
             )
         return films
     finally:

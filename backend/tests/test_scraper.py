@@ -59,6 +59,7 @@ def test_parse_tmdb_id_missing_returns_none():
     assert parse_tmdb_id("<html><body>no link</body></html>") is None
 
 from app.scraper import scrape_profile
+from app.scraper import crawl_films_list
 
 def test_scrape_profile_paginates_and_resolves_tmdb_ids():
     page1 = (FIX / "films_page.html").read_text()  # 3 films: parasite, cats, unrated-film
@@ -209,3 +210,62 @@ def test_scrape_profile_raises_cancelled_even_if_browser_close_fails():
     with pytest.raises(Cancelled):
         scrape_profile("alice", fake_get, delay=0, should_cancel=lambda: True)
     assert not hasattr(scraper._thread_local, "browser")
+
+def test_crawl_films_list_paginates_without_detail_pages():
+    page1 = (FIX / "films_page.html").read_text()  # 3 films + next link
+    page2 = '<html><body><ul class="poster-list"></ul></body></html>'
+    urls = []
+    def fake_get(url):
+        urls.append(url)
+        return page2 if "/page/2/" in url else page1
+    entries = crawl_films_list("alice", fake_get, delay=0)
+    assert len(entries) == 3
+    assert entries[0]["year"] == 2019
+    assert all("/film/" not in u for u in urls)  # list pages only
+
+def test_scrape_profile_with_injected_resolver_never_touches_detail_pages():
+    page1 = (FIX / "films_page.html").read_text()
+    page2 = '<html><body><ul class="poster-list"></ul></body></html>'
+    stats = '<html><body><h4 class="profile-statistic"><a href="/alice/films/"><span class="value">3</span></a></h4></body></html>'
+    urls = []
+    def fake_get(url):
+        urls.append(url)
+        if "/page/2/" in url:
+            return page2
+        if url.endswith("/alice/"):
+            return stats
+        return page1
+    def resolve_ids(entries, on_progress=None, should_cancel=None):
+        for e in entries:
+            e["tmdb_id"] = 496243
+    films = scrape_profile("alice", fake_get, delay=0, resolve_ids=resolve_ids)
+    assert len(films) == 3
+    assert all("/film/" not in u for u in urls)
+
+def test_scrape_profile_drops_films_the_resolver_could_not_resolve():
+    page1 = (FIX / "films_page.html").read_text()
+    stats = '<html><body><h4 class="profile-statistic"><a href="/alice/films/"><span class="value">3</span></a></h4></body></html>'
+    def fake_get(url):
+        return stats if url.endswith("/alice/") else page1.replace(
+            '<a class="next" href="/alice/films/page/2/">Older</a>', "")
+    def resolve_ids(entries, on_progress=None, should_cancel=None):
+        for e in entries:
+            e["tmdb_id"] = 496243 if e["slug"] == "parasite" else None
+    films = scrape_profile("alice", fake_get, delay=0, resolve_ids=resolve_ids)
+    assert [f["slug"] for f in films] == ["parasite"]
+
+def test_incomplete_scrape_error_mentions_export_import():
+    page1 = (FIX / "films_page.html").read_text()
+    page2 = '<html><body></body></html>'
+    stats = '<html><body><h4 class="profile-statistic"><a href="/alice/films/"><span class="value">87</span></a></h4></body></html>'
+    def fake_get(url):
+        if "/page/2/" in url:
+            return page2
+        if url.endswith("/alice/"):
+            return stats
+        return page1
+    def resolve_ids(entries, on_progress=None, should_cancel=None):
+        for e in entries:
+            e["tmdb_id"] = 1
+    with pytest.raises(RuntimeError, match="Letterboxd export"):
+        scrape_profile("alice", fake_get, delay=0, resolve_ids=resolve_ids)
