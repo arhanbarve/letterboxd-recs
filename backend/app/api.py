@@ -121,6 +121,7 @@ def create_app(
         return {"last_updated": row["ts"]}
 
     ACTIVE_STAGES = {"starting", "scraping", "enriching", "profiling", "scoring"}
+    MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
     def _launch_refresh(username, starting_message, entries=None):
         set_progress = make_set_progress(username)
@@ -158,7 +159,9 @@ def create_app(
 
     @app.post("/api/refresh/upload")
     async def refresh_upload(file: UploadFile = File(...), username: str | None = Form(None)):
-        data = await file.read()
+        data = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="Export file too large (max 20MB).")
         try:
             entries = parse_export(data)
         except ValueError as e:
