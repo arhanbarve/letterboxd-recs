@@ -1,12 +1,23 @@
+import time
+
 import requests
 
 API = "https://api.themoviedb.org/3"
+TIMEOUT = 15
+MAX_RETRIES = 3
 
 def _get(session, url, params):
     s = session or requests
-    resp = s.get(url, params=params)
-    resp.raise_for_status()
-    return resp.json()
+    for attempt in range(MAX_RETRIES):
+        if attempt:
+            time.sleep(2 ** (attempt - 1))  # 1s, 2s
+        try:
+            resp = s.get(url, params=params, timeout=TIMEOUT)
+            resp.raise_for_status()
+            return resp.json()
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == MAX_RETRIES - 1:
+                raise
 
 def enrich(tmdb_id: int, api_key: str, session=None) -> dict:
     data = _get(session, f"{API}/movie/{tmdb_id}", {

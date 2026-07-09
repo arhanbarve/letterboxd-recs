@@ -1,5 +1,58 @@
+import requests
+import pytest
 import responses
-from app.tmdb import enrich, related_ids, watch_providers, search_person, discover_by_person, search_movie
+from app.tmdb import (
+    enrich, related_ids, watch_providers, search_person, discover_by_person,
+    search_movie, _get, TIMEOUT, MAX_RETRIES,
+)
+
+class _FakeResp:
+    def __init__(self, json_data):
+        self._json = json_data
+    def raise_for_status(self):
+        pass
+    def json(self):
+        return self._json
+
+class _FailNTimesSession:
+    """Fails with exc_cls on the first n_failures calls, then returns result."""
+    def __init__(self, n_failures, exc_cls=requests.exceptions.ConnectionError, result=None):
+        self.n_failures = n_failures
+        self.exc_cls = exc_cls
+        self.result = result if result is not None else {"ok": True}
+        self.calls = []
+    def get(self, url, params=None, timeout=None):
+        self.calls.append({"url": url, "params": params, "timeout": timeout})
+        if len(self.calls) <= self.n_failures:
+            raise self.exc_cls("boom")
+        return _FakeResp(self.result)
+
+def test_get_passes_a_timeout(monkeypatch):
+    monkeypatch.setattr("app.tmdb.time.sleep", lambda s: None)
+    s = _FailNTimesSession(0)
+    _get(s, "https://api.themoviedb.org/3/movie/1", {"api_key": "k"})
+    assert s.calls[0]["timeout"] == TIMEOUT
+
+def test_get_retries_on_connection_error_then_succeeds(monkeypatch):
+    monkeypatch.setattr("app.tmdb.time.sleep", lambda s: None)
+    s = _FailNTimesSession(1, exc_cls=requests.exceptions.ConnectionError)
+    data = _get(s, "https://api.themoviedb.org/3/movie/1", {"api_key": "k"})
+    assert data == {"ok": True}
+    assert len(s.calls) == 2
+
+def test_get_retries_on_read_timeout_then_succeeds(monkeypatch):
+    monkeypatch.setattr("app.tmdb.time.sleep", lambda s: None)
+    s = _FailNTimesSession(1, exc_cls=requests.exceptions.Timeout)
+    data = _get(s, "https://api.themoviedb.org/3/movie/1", {"api_key": "k"})
+    assert data == {"ok": True}
+    assert len(s.calls) == 2
+
+def test_get_raises_after_exhausting_retries(monkeypatch):
+    monkeypatch.setattr("app.tmdb.time.sleep", lambda s: None)
+    s = _FailNTimesSession(99, exc_cls=requests.exceptions.ConnectionError)
+    with pytest.raises(requests.exceptions.ConnectionError):
+        _get(s, "https://api.themoviedb.org/3/movie/1", {"api_key": "k"})
+    assert len(s.calls) == MAX_RETRIES
 
 @responses.activate
 def test_enrich_normalizes_movie():
