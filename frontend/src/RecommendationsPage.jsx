@@ -73,6 +73,15 @@ export default function RecommendationsPage({ username }) {
     await start();
   };
 
+  const onImport = async (file) => {
+    if (!username) {
+      setError("Enter your Letterboxd username above before importing.");
+      return;
+    }
+    setError(null);
+    await startFromUpload(file);
+  };
+
   const LONG_SHOT_THRESHOLD = 70;
   const PAGE_SIZE = 25;
 
@@ -99,7 +108,7 @@ export default function RecommendationsPage({ username }) {
         </h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <LastUpdated iso={updatedAt} />
-          <RefreshButton loading={isRunning} hasData={hasData} onClick={onRefresh} onCancel={cancel} onImport={startFromUpload} />
+          <RefreshButton loading={isRunning} hasData={hasData} onClick={onRefresh} onCancel={cancel} onImport={onImport} />
         </div>
       </div>
 
