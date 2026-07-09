@@ -1,4 +1,4 @@
-from app.db import connect, init_schema
+from app.db import connect, init_schema, lookup_slug_tmdb, store_slug_tmdb
 
 def test_init_schema_creates_tables(tmp_path):
     db = str(tmp_path / "t.db")
@@ -53,3 +53,24 @@ def test_init_schema_is_idempotent_on_existing_db(tmp_path):
     init_schema(conn)  # must not raise on second call
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "people" in tables
+
+def test_slug_tmdb_cache_roundtrip():
+    conn = connect(":memory:")
+    init_schema(conn)
+    assert lookup_slug_tmdb(conn, "parasite") is None  # no row yet
+    store_slug_tmdb(conn, "parasite", 496243, "search")
+    assert lookup_slug_tmdb(conn, "parasite") == (496243,)
+
+def test_slug_tmdb_cache_stores_negative_result():
+    conn = connect(":memory:")
+    init_schema(conn)
+    store_slug_tmdb(conn, "obscure-film", None, "none")
+    # row exists (don't re-fetch) but the id is None
+    assert lookup_slug_tmdb(conn, "obscure-film") == (None,)
+
+def test_slug_tmdb_cache_upsert_overwrites():
+    conn = connect(":memory:")
+    init_schema(conn)
+    store_slug_tmdb(conn, "parasite", None, "none")
+    store_slug_tmdb(conn, "parasite", 496243, "detail")
+    assert lookup_slug_tmdb(conn, "parasite") == (496243,)
