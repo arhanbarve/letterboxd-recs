@@ -2,11 +2,12 @@ import dataclasses
 import json
 import threading
 import time
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import load_config
+from app.csv_import import parse_export
 from app.db import connect, init_schema, lookup_slug_tmdb, store_slug_tmdb
 from app.errors import Cancelled
 from app.pipeline import run_refresh, Deps
@@ -24,7 +25,7 @@ def _real_watch_providers(tmdb_id):
     cfg = load_config()
     return watch_providers(tmdb_id, cfg.tmdb_api_key)
 
-def _real_refresh(conn, username=None, on_progress=None, cancel_event=None):
+def _real_refresh(conn, username=None, on_progress=None, cancel_event=None, entries=None):
     cfg = load_config()
     if username:
         cfg = dataclasses.replace(cfg, username=username)
@@ -35,6 +36,13 @@ def _real_refresh(conn, username=None, on_progress=None, cancel_event=None):
         return tid
 
     def scrape(user, on_progress=None, should_cancel=None):
+        if entries is not None:
+            # Upload path: pre-parsed export rows, TMDB-search-only resolution —
+            # zero Letterboxd requests, physically un-rate-limitable.
+            resolve_ids = make_resolver(
+                search_fn=lambda title, year: search_movie(title, year, cfg.tmdb_api_key))
+            resolve_ids(entries, on_progress=on_progress, should_cancel=should_cancel)
+            return [e for e in entries if e.get("tmdb_id") is not None]
         rss_xml = fetch_rss(user, get_html=default_get)
         resolve_ids = make_resolver(
             cache_get=lambda slug: lookup_slug_tmdb(conn, slug),
@@ -114,23 +122,25 @@ def create_app(
 
     ACTIVE_STAGES = {"starting", "scraping", "enriching", "profiling", "scoring"}
 
-    @app.post("/api/refresh")
-    def refresh(body: RefreshRequest | None = None):
-        username = body.username if body else None
+    def _launch_refresh(username, starting_message, entries=None):
         set_progress = make_set_progress(username)
-
         with progress_lock:
             if progress_by_user.get(username, {}).get("stage") in ACTIVE_STAGES:
                 return {"status": "already_running"}
             cancel_event = threading.Event()
             cancel_events[username] = cancel_event
             progress_by_user.setdefault(username, {}).update(
-                {"stage": "starting", "current": 0, "total": None, "message": "Starting refresh..."})
+                {"stage": "starting", "current": 0, "total": None, "message": starting_message})
 
         def run():
             conn = get_conn()
             try:
-                refresh_fn(conn, username, on_progress=set_progress, cancel_event=cancel_event)
+                if entries is not None:
+                    refresh_fn(conn, username, on_progress=set_progress,
+                               cancel_event=cancel_event, entries=entries)
+                else:
+                    refresh_fn(conn, username, on_progress=set_progress,
+                               cancel_event=cancel_event)
             except Cancelled:
                 conn.rollback()
                 set_progress({"stage": "cancelled", "current": 0, "total": None, "message": "Refresh cancelled."})
@@ -140,6 +150,20 @@ def create_app(
 
         threading.Thread(target=run, daemon=True).start()
         return {"status": "started"}
+
+    @app.post("/api/refresh")
+    def refresh(body: RefreshRequest | None = None):
+        username = body.username if body else None
+        return _launch_refresh(username, "Starting refresh...")
+
+    @app.post("/api/refresh/upload")
+    async def refresh_upload(file: UploadFile = File(...), username: str | None = Form(None)):
+        data = await file.read()
+        try:
+            entries = parse_export(data)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return _launch_refresh(username, "Importing your Letterboxd export...", entries=entries)
 
     @app.post("/api/refresh/cancel")
     def refresh_cancel(body: RefreshRequest | None = None):
