@@ -160,8 +160,8 @@ def scrape_profile(
         entries = crawl_films_list(username, get_html, delay=delay, should_cancel=should_cancel)
 
         if resolve_ids is None:
-            # Standalone/legacy mode: detail-page-only cascade. The live API path
-            # always injects the full cache->rss->search->detail cascade instead.
+            # Standalone/legacy mode: detail-page-only cascade, used until callers
+            # inject the full cache->rss->search->detail cascade (see resolver.py).
             def detail_fn(slug):
                 html = get_html(f"{BASE}/film/{slug}/")
                 if delay:
