@@ -47,11 +47,3 @@ export async function getFilmDetail(tmdbId) {
   const r = await fetch(`${BASE}/api/films/${tmdbId}`);
   return r.json();
 }
-
-export async function uploadExport(username, file) {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("username", username);
-  const r = await fetch(`${BASE}/api/refresh/upload`, { method: "POST", body: form });
-  return r.json();
-}

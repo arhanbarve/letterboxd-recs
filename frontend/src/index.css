@@ -360,20 +360,6 @@ input:focus-visible,
   color: var(--ink);
 }
 
-.import-link {
-  background: none;
-  border: none;
-  padding: 0;
-  margin-left: 12px;
-  font-size: 0.8rem;
-  color: var(--muted);
-  text-decoration: underline;
-  cursor: pointer;
-}
-.import-link:hover {
-  color: var(--ink);
-}
-
 .refresh-btn.loading::before {
   content: "";
   position: absolute;

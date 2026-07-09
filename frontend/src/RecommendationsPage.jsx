@@ -27,7 +27,7 @@ export default function RecommendationsPage({ username }) {
   const [error, setError] = useState(null);
   const [selectedFilm, setSelectedFilm] = useState(null);
   const [updatedAt, setUpdatedAt] = useState(null);
-  const { status, isRunning, start, startFromUpload, cancel, lastCompletedAt } = useRefresh();
+  const { status, isRunning, start, cancel, lastCompletedAt } = useRefresh();
 
   const load = async () => {
     if (!username) return;
@@ -73,15 +73,6 @@ export default function RecommendationsPage({ username }) {
     await start();
   };
 
-  const onImport = async (file) => {
-    if (!username) {
-      setError("Enter your Letterboxd username above before importing.");
-      return;
-    }
-    setError(null);
-    await startFromUpload(file);
-  };
-
   const LONG_SHOT_THRESHOLD = 70;
   const PAGE_SIZE = 25;
 
@@ -108,7 +99,7 @@ export default function RecommendationsPage({ username }) {
         </h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <LastUpdated iso={updatedAt} />
-          <RefreshButton loading={isRunning} hasData={hasData} onClick={onRefresh} onCancel={cancel} onImport={onImport} />
+          <RefreshButton loading={isRunning} hasData={hasData} onClick={onRefresh} onCancel={cancel} />
         </div>
       </div>
 
