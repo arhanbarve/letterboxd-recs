@@ -55,4 +55,5 @@ Two pieces: backend on **Railway**, frontend on **Vercel**. Both have free tiers
 
 - Everyone shares one TMDB API key (fine at friend-group scale — TMDB's rate limit is generous).
 - A refresh scrapes the real Letterboxd site via a headless browser (Letterboxd sits behind Cloudflare bot-protection that blocks plain HTTP scraping) — expect a refresh to take several minutes for a profile with many rated films.
+- If a refresh ever fails with a "blocked" message, use the **Import from Letterboxd export** button instead: on letterboxd.com go to Settings → Data → Export, download the zip, and upload it in the app. This path makes zero Letterboxd requests, so it works regardless of bot-protection state.
 - No accounts/auth: anyone with the URL can enter any Letterboxd username. Fine for a small trusted friend group; not intended for public/untrusted use.
