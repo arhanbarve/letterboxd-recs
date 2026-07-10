@@ -114,6 +114,23 @@ def test_enrich_handles_missing_director():
     assert m["director_id"] is None
     assert m["director_person"] is None
 
+def test_enrich_captures_imdb_id_and_vote_count():
+    class FakeResp:
+        def raise_for_status(self): pass
+        def json(self):
+            return {
+                "title": "X", "release_date": "2010-01-01",
+                "vote_average": 7.5, "vote_count": 1234,
+                "genres": [], "credits": {"crew": [], "cast": []},
+                "keywords": {"keywords": []},
+                "external_ids": {"imdb_id": "tt0111161"},
+            }
+    class FakeSession:
+        def get(self, url, params=None, timeout=None): return FakeResp()
+    m = enrich(1, "key", session=FakeSession())
+    assert m["imdb_id"] == "tt0111161"
+    assert m["vote_count"] == 1234
+
 @responses.activate
 def test_related_ids_paginates_across_multiple_pages():
     for endpoint in ("recommendations", "similar"):

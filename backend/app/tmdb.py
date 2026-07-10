@@ -22,7 +22,7 @@ def _get(session, url, params):
 def enrich(tmdb_id: int, api_key: str, session=None) -> dict:
     data = _get(session, f"{API}/movie/{tmdb_id}", {
         "api_key": api_key,
-        "append_to_response": "credits,keywords",
+        "append_to_response": "credits,keywords,external_ids",
     })
     year = int(data["release_date"][:4]) if data.get("release_date") else None
     crew = data.get("credits", {}).get("crew", [])
@@ -52,6 +52,8 @@ def enrich(tmdb_id: int, api_key: str, session=None) -> dict:
         "overview": data.get("overview"),
         "runtime": data.get("runtime"),
         "vote_avg": data.get("vote_average"),
+        "vote_count": data.get("vote_count"),
+        "imdb_id": data.get("external_ids", {}).get("imdb_id") or data.get("imdb_id"),
     }
 
 def watch_providers(tmdb_id: int, api_key: str, region: str = "US", session=None) -> dict:
