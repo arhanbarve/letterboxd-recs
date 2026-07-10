@@ -93,7 +93,7 @@ def predict_rating(cand: dict, rated: list[dict], k: int = 10) -> float:
     wsum = sum(w for w, _ in top)
     return sum(w * r for w, r in top) / wsum
 
-ANCHOR_PCT = 95.0
+ANCHOR_PCT = 92.0
 MAX_PCT = 99.0
 FLOOR_VOTES = 50
 FLOOR_AVG = 5.0
@@ -111,14 +111,17 @@ def _below_floor(cand) -> bool:
     return va is not None and vc >= FLOOR_VOTES and va < FLOOR_AVG
 
 def _anchor_raw(rated, profile):
-    """Raw score a beloved film earns against this profile -> maps to ANCHOR_PCT."""
+    """The raw score of the user's single best-fitting beloved film -> maps to
+    ANCHOR_PCT. Using the max (not median) keeps the top of the list honest: a
+    candidate only nears 90%+ when it fits the profile as well as your most
+    on-profile favorite, so the top isn't a flat wall of capped scores."""
     highs = [f for f in rated if f.get("rating", 0) >= 4.5]
     if len(highs) < 3:
         highs = [f for f in rated if f.get("rating", 0) >= 4.0]
-    raws = sorted(match_raw_score(f, profile) for f in highs)
+    raws = [match_raw_score(f, profile) for f in highs]
     if not raws:
         return None
-    return raws[len(raws) // 2]  # median
+    return max(raws)
 
 def score_candidates(cands, profile, rated, k: int = 10) -> list[dict]:
     if not cands:

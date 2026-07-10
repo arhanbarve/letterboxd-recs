@@ -125,5 +125,16 @@ def test_quality_factor_tilts_ranking_between_equal_taste():
     results = score_candidates([b, a], PROFILE, rated)
     assert results[0]["tmdb_id"] == 10   # acclaimed ranks above equal-taste mediocre
 
+def test_match_pct_anchors_to_best_beloved_not_flat_cap():
+    best = {"rating": 5.0, "title": "Best", "genres": ["Thriller"], "keywords": ["class conflict"],
+            "director": "Bong Joon-ho", "cast": ["Song Kang-ho"], "decade": 2010}
+    perfect = dict(CAND)                       # raw 1.0 == anchor -> exactly ANCHOR_PCT
+    half = {"tmdb_id": 3, "genres": ["Thriller"], "keywords": [], "director": "X", "cast": [], "decade": 1990}
+    results = score_candidates([perfect, half], PROFILE, [best])
+    top = next(r for r in results if r["tmdb_id"] == 999)
+    assert top["match_pct"] == 92.0            # anchored to best-beloved, not a capped 99
+    lo = next(r for r in results if r["tmdb_id"] == 3)
+    assert lo["match_pct"] < top["match_pct"]  # real spread below the top
+
 def test_score_candidates_empty_pool_returns_empty_list():
     assert score_candidates([], PROFILE, [{"rating": 5.0, "title": "X", "genres": ["Thriller"]}]) == []
