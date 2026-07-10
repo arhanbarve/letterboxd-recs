@@ -90,14 +90,40 @@ def test_why_for_empty_when_no_rated_films_are_similar():
     unrelated = {"rating": 3.0, "title": "Nothing Alike", "genres": ["Romance"], "keywords": []}
     assert why_for(CAND, [unrelated]) == {"neighbors": [], "connection": None}
 
-def test_score_candidates_normalizes_and_ranks():
+def test_score_candidates_anchors_best_high_and_ranks():
     cands = [CAND, {"tmdb_id": 2, "genres": ["Comedy"], "keywords": [],
                     "director": "X", "cast": [], "decade": 1990}]
     rated = [{"rating": 5.0, "title": "Snowpiercer", "genres": ["Thriller"], "keywords": ["class conflict"]}]
     results = score_candidates(cands, PROFILE, rated, k=1)
-    assert results[0]["tmdb_id"] == 999          # ranked first
-    assert results[0]["match_pct"] == 100.0       # perfect match on every weighted family == THEORETICAL_MAX
-    assert results[-1]["match_pct"] == 12.5       # only genre family contributes: 0.25 * 0.5 affinity = 0.125 raw -> 12.5%
+    assert results[0]["tmdb_id"] == 999           # perfect match ranked first
+    assert results[0]["match_pct"] >= 90.0         # anchored: best reads high, not ~50%
+    assert results[-1]["match_pct"] < results[0]["match_pct"]
+
+def test_quality_floor_excludes_panned_films():
+    good = dict(CAND); good["vote_avg"] = 7.0; good["vote_count"] = 500
+    panned = {"tmdb_id": 7, "genres": ["Thriller"], "keywords": ["class conflict"],
+              "director": "Bong Joon-ho", "cast": ["Song Kang-ho"], "decade": 2010,
+              "vote_avg": 3.2, "vote_count": 400}
+    rated = [{"rating": 5.0, "title": "Snowpiercer", "genres": ["Thriller"], "keywords": ["class conflict"]}]
+    ids = {r["tmdb_id"] for r in score_candidates([good, panned], PROFILE, rated)}
+    assert 7 not in ids and 999 in ids
+
+def test_sparse_votes_not_excluded():
+    obscure = {"tmdb_id": 8, "genres": ["Thriller"], "keywords": ["class conflict"],
+               "director": "Bong Joon-ho", "cast": ["Song Kang-ho"], "decade": 2010,
+               "vote_avg": 3.0, "vote_count": 4}
+    rated = [{"rating": 5.0, "title": "Snowpiercer", "genres": ["Thriller"], "keywords": ["class conflict"]}]
+    ids = {r["tmdb_id"] for r in score_candidates([obscure], PROFILE, rated)}
+    assert 8 in ids
+
+def test_quality_factor_tilts_ranking_between_equal_taste():
+    a = {"tmdb_id": 10, "genres": ["Thriller"], "keywords": ["class conflict"],
+         "vote_avg": 8.4, "vote_count": 900}
+    b = {"tmdb_id": 11, "genres": ["Thriller"], "keywords": ["class conflict"],
+         "vote_avg": 5.2, "vote_count": 900}
+    rated = [{"rating": 5.0, "title": "Snowpiercer", "genres": ["Thriller"], "keywords": ["class conflict"]}]
+    results = score_candidates([b, a], PROFILE, rated)
+    assert results[0]["tmdb_id"] == 10   # acclaimed ranks above equal-taste mediocre
 
 def test_score_candidates_empty_pool_returns_empty_list():
     assert score_candidates([], PROFILE, [{"rating": 5.0, "title": "X", "genres": ["Thriller"]}]) == []

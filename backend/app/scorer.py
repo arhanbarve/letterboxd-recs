@@ -93,18 +93,54 @@ def predict_rating(cand: dict, rated: list[dict], k: int = 10) -> float:
     wsum = sum(w for w, _ in top)
     return sum(w * r for w, r in top) / wsum
 
+ANCHOR_PCT = 95.0
+MAX_PCT = 99.0
+FLOOR_VOTES = 50
+FLOOR_AVG = 5.0
+QF_LO_AVG, QF_HI_AVG = 5.0, 8.5
+QF_LO, QF_HI = 0.85, 1.12
+
+def quality_factor(vote_avg, vote_count) -> float:
+    if vote_avg is None or (vote_count or 0) < FLOOR_VOTES:
+        return 1.0
+    t = max(0.0, min(1.0, (vote_avg - QF_LO_AVG) / (QF_HI_AVG - QF_LO_AVG)))
+    return QF_LO + t * (QF_HI - QF_LO)
+
+def _below_floor(cand) -> bool:
+    va, vc = cand.get("vote_avg"), cand.get("vote_count") or 0
+    return va is not None and vc >= FLOOR_VOTES and va < FLOOR_AVG
+
+def _anchor_raw(rated, profile):
+    """Raw score a beloved film earns against this profile -> maps to ANCHOR_PCT."""
+    highs = [f for f in rated if f.get("rating", 0) >= 4.5]
+    if len(highs) < 3:
+        highs = [f for f in rated if f.get("rating", 0) >= 4.0]
+    raws = sorted(match_raw_score(f, profile) for f in highs)
+    if not raws:
+        return None
+    return raws[len(raws) // 2]  # median
+
 def score_candidates(cands, profile, rated, k: int = 10) -> list[dict]:
     if not cands:
         return []
+    anchor = _anchor_raw(rated, profile)
+    if not anchor or anchor <= 0:
+        anchor = max((match_raw_score(c, profile) for c in cands), default=1.0) or 1.0
     results = []
     for c in cands:
+        if _below_floor(c):
+            continue
         raw = match_raw_score(c, profile)
-        match_pct = round(max(0.0, min(raw, THEORETICAL_MAX)) / THEORETICAL_MAX * 100.0, 1)
+        eff = raw * quality_factor(c.get("vote_avg"), c.get("vote_count"))
+        pct = max(0.0, min(MAX_PCT, (eff / anchor) * ANCHOR_PCT))
         results.append({
             "tmdb_id": c["tmdb_id"],
-            "match_pct": match_pct,
+            "match_pct": round(pct, 1),
             "predicted_rating": round(predict_rating(c, rated, k), 2),
             "why": why_for(c, rated),
+            "_eff": eff,
         })
-    results.sort(key=lambda r: r["match_pct"], reverse=True)
+    results.sort(key=lambda r: r["_eff"], reverse=True)
+    for r in results:
+        del r["_eff"]
     return results
