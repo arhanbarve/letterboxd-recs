@@ -54,6 +54,13 @@ def test_init_schema_is_idempotent_on_existing_db(tmp_path):
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "people" in tables
 
+def test_schema_has_quality_columns(tmp_path):
+    from app.db import connect, init_schema
+    conn = connect(str(tmp_path / "t.db"))
+    init_schema(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(films)").fetchall()}
+    assert {"vote_count", "imdb_rating", "rt_score"} <= cols
+
 def test_slug_tmdb_cache_roundtrip():
     conn = connect(":memory:")
     init_schema(conn)

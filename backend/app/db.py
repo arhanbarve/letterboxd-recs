@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS films (
     title TEXT, year INTEGER, decade INTEGER,
     director TEXT, director_id INTEGER,
     poster_path TEXT, backdrop_path TEXT, overview TEXT, runtime INTEGER,
-    tmdb_vote_avg REAL
+    tmdb_vote_avg REAL, vote_count INTEGER, imdb_rating REAL, rt_score INTEGER
 );
 CREATE TABLE IF NOT EXISTS film_genres (film_id INTEGER, genre TEXT);
 CREATE TABLE IF NOT EXISTS film_keywords (film_id INTEGER, keyword TEXT);
@@ -38,6 +38,9 @@ _MIGRATIONS = [
     "ALTER TABLE films ADD COLUMN runtime INTEGER",
     "ALTER TABLE film_cast ADD COLUMN person_id INTEGER",
     "ALTER TABLE recommendations ADD COLUMN why TEXT",
+    "ALTER TABLE films ADD COLUMN vote_count INTEGER",
+    "ALTER TABLE films ADD COLUMN imdb_rating REAL",
+    "ALTER TABLE films ADD COLUMN rt_score INTEGER",
 ]
 
 def connect(db_path: str) -> sqlite3.Connection:
