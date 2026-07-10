@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import load_config
 from app.db import connect, init_schema, lookup_slug_tmdb, store_slug_tmdb
 from app.errors import Cancelled
+from app.omdb import fetch_ratings
 from app.pipeline import run_refresh, Deps
 from app.resolver import make_resolver
 from app.rss import fetch_rss, parse_rss_tmdb_map
@@ -52,6 +53,7 @@ def _real_refresh(conn, username=None, on_progress=None, cancel_event=None):
         related_fn=lambda tid, key: related_ids(tid, key, pages=3),
         person_search_fn=lambda name, key: search_person(name, key),
         person_discover_fn=lambda pid, key: discover_by_person(pid, key),
+        omdb_fn=lambda imdb_id: fetch_ratings(imdb_id, cfg.omdb_api_key),
     )
     run_refresh(conn, cfg, deps, on_progress=on_progress, cancel_event=cancel_event)
 

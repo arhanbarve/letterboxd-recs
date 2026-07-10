@@ -10,6 +10,7 @@ from app.scorer import score_candidates
 LIKED_THRESHOLD = 4.0
 FALLBACK_THRESHOLD = 3.5
 TOP_PEOPLE_COUNT = 5
+OMDB_TOP_N = 80
 
 @dataclass
 class Deps:
@@ -18,6 +19,7 @@ class Deps:
     related_fn: callable  # (tmdb_id, api_key) -> list[int]
     person_search_fn: callable = None   # (name, api_key) -> person_id | None
     person_discover_fn: callable = None  # (person_id, api_key) -> list[int]
+    omdb_fn: callable = None  # (imdb_id) -> {"imdb_rating","rt_score"}
 
 def _noop(*args, **kwargs):
     pass
@@ -52,10 +54,11 @@ def _persist_film(conn, m):
 
     conn.execute(
         "INSERT OR REPLACE INTO films"
-        " (tmdb_id,title,year,decade,director,director_id,poster_path,backdrop_path,overview,runtime,tmdb_vote_avg)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        " (tmdb_id,title,year,decade,director,director_id,poster_path,backdrop_path,overview,runtime,tmdb_vote_avg,vote_count)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (m["tmdb_id"], m["title"], m["year"], m["decade"], m["director"], m.get("director_id"),
-         m["poster_path"], m.get("backdrop_path"), m.get("overview"), m.get("runtime"), m["vote_avg"]))
+         m["poster_path"], m.get("backdrop_path"), m.get("overview"), m.get("runtime"), m["vote_avg"],
+         m.get("vote_count")))
     conn.execute("DELETE FROM film_genres WHERE film_id=?", (m["tmdb_id"],))
     conn.execute("DELETE FROM film_keywords WHERE film_id=?", (m["tmdb_id"],))
     conn.execute("DELETE FROM film_cast WHERE film_id=?", (m["tmdb_id"],))
@@ -126,6 +129,18 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> N
         _persist_film(conn, m)
 
     results = score_candidates(cand_meta, profile, rated_meta)
+
+    if deps.omdb_fn:
+        imdb_by_id = {m["tmdb_id"]: m.get("imdb_id") for m in cand_meta}
+        for r in results[:OMDB_TOP_N]:
+            _check_cancel(cancel_event)
+            imdb_id = imdb_by_id.get(r["tmdb_id"])
+            if not imdb_id:
+                continue
+            ratings = deps.omdb_fn(imdb_id)
+            conn.execute(
+                "UPDATE films SET imdb_rating=?, rt_score=? WHERE tmdb_id=?",
+                (ratings.get("imdb_rating"), ratings.get("rt_score"), r["tmdb_id"]))
 
     now = datetime.now(timezone.utc).isoformat()
     conn.execute("DELETE FROM recommendations WHERE username=?", (cfg.username,))

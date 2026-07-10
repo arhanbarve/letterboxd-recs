@@ -45,6 +45,39 @@ def test_run_refresh_persists_recommendations(tmp_path):
     assert 1 not in ids         # already watched, excluded
     assert 2 not in ids         # already watched, excluded
 
+def test_run_refresh_stores_omdb_ratings_for_top_results(tmp_path):
+    conn = connect(str(tmp_path / "t.db"))
+    init_schema(conn)
+    cfg = Config(username="alice", tmdb_api_key="k", db_path="t.db")
+
+    scraped = [{"slug": "parasite", "title": "Parasite", "rating": 5.0, "tmdb_id": 1}]
+    meta = {
+        1: {"tmdb_id": 1, "title": "Parasite", "year": 2019, "decade": 2010,
+            "director": "Bong", "genres": ["Thriller"], "cast": ["Song"],
+            "keywords": ["class conflict"], "poster_path": "/p.jpg", "vote_avg": 8.5,
+            "director_id": 1001, "director_person": {"person_id": 1001, "name": "Bong", "profile_path": "/bong.jpg"},
+            "cast_people": [{"person_id": 2001, "name": "Song", "profile_path": "/song.jpg"}],
+            "backdrop_path": "/p_bd.jpg", "overview": "A poor family schemes.", "runtime": 132},
+        99: {"tmdb_id": 99, "title": "Rec", "year": 2018, "decade": 2010,
+             "director": "Bong", "genres": ["Thriller"], "cast": ["Song"],
+             "keywords": ["class conflict"], "poster_path": "/r.jpg", "vote_avg": 7.9,
+             "imdb_id": "tt0111161",
+             "director_id": 1001, "director_person": {"person_id": 1001, "name": "Bong", "profile_path": "/bong.jpg"},
+             "cast_people": [{"person_id": 2001, "name": "Song", "profile_path": "/song.jpg"}],
+             "backdrop_path": "/r_bd.jpg", "overview": "A recommended film.", "runtime": 118},
+    }
+    deps = Deps(
+        scrape_fn=lambda user, on_progress=None, should_cancel=None: scraped,
+        enrich_fn=lambda tid, key: meta[tid],
+        related_fn=lambda tid, key: [99],
+        omdb_fn=lambda imdb_id: {"imdb_rating": 8.0, "rt_score": 90},
+    )
+    run_refresh(conn, cfg, deps)
+
+    row = conn.execute(
+        "SELECT imdb_rating, rt_score FROM films WHERE imdb_rating IS NOT NULL LIMIT 1").fetchone()
+    assert row["imdb_rating"] == 8.0 and row["rt_score"] == 90
+
 def test_run_refresh_reports_progress_through_stages(tmp_path):
     conn = connect(str(tmp_path / "t.db"))
     init_schema(conn)
