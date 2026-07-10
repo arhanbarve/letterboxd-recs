@@ -2,10 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { getTasteProfile, getLastUpdated } from "./api";
 import { useRefresh } from "./context/RefreshContext";
 import GenreRadar from "./components/GenreRadar";
+import PersonCard from "./components/PersonCard";
 import LastUpdated from "./components/LastUpdated";
 import ProgressBar from "./components/ProgressBar";
-
-const FACE = "https://image.tmdb.org/t/p/w185";
 
 function StatTile({ value, label }) {
   return (
@@ -36,14 +35,7 @@ function PeopleWall({ title, people }) {
       <p className="section-title">{title}</p>
       <div className="people-wall">
         {people.map((p) => (
-          <div className="person-face" key={p.name}>
-            {p.profile_path ? (
-              <img src={FACE + p.profile_path} alt={p.name} />
-            ) : (
-              <div className="person-face-placeholder">{p.name[0]}</div>
-            )}
-            <div className="person-name">{p.name}</div>
-          </div>
+          <PersonCard person={p} key={p.name} />
         ))}
       </div>
     </div>

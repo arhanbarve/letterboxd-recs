@@ -685,14 +685,16 @@ input:focus-visible,
   color: var(--muted); background: var(--surface);
 }
 
-.genre-radar { width: 100%; max-width: 230px; }
+.genre-radar { width: 100%; max-width: 320px; }
 .radar-grid { fill: none; stroke: var(--border); }
 .radar-shape { fill: color-mix(in srgb, var(--accent) 28%, transparent); stroke: var(--accent); stroke-width: 2; }
-.radar-label { fill: var(--muted); font-size: 9px; font-family: var(--font-body); }
+.radar-spoke { stroke: var(--border); stroke-width: 1; opacity: 0.5; }
+.radar-vertex { fill: var(--accent); cursor: pointer; }
+.radar-label { fill: var(--muted); font-size: 10px; font-family: var(--font-body); }
 
 .people-wall-section { margin-bottom: 20px; }
-.people-wall { display: flex; flex-wrap: wrap; gap: 14px; }
-.person-face { text-align: center; width: 78px; }
+.people-wall { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+.person-face { text-align: center; width: 78px; position: relative; }
 .person-face img, .person-face-placeholder {
   width: 64px; height: 64px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent);
 }
@@ -700,7 +702,18 @@ input:focus-visible,
   display: flex; align-items: center; justify-content: center; background: var(--surface);
   color: var(--accent); font-family: var(--font-display); font-size: 22px;
 }
-.person-name { font-size: 11px; color: var(--ink); margin-top: 6px; }
+.person-name { font-size: 11px; color: var(--ink); margin-top: 6px; text-align: center; }
+.person-popover {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  z-index: var(--z-overlay); width: 220px; padding: 10px; border-radius: 10px;
+  background: var(--surface-raised); border: 1px solid var(--border);
+  box-shadow: 0 16px 40px -12px rgba(0,0,0,0.6);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.person-pop-film { display: flex; gap: 8px; align-items: center; }
+.person-pop-film img { width: 34px; border-radius: 4px; }
+.person-pop-meta { display: flex; flex-direction: column; font-size: 12px; }
+.person-pop-meta span { color: var(--accent); }
 
 @media (max-width: 720px) {
   .marquee-trio { grid-template-columns: 1fr; }
