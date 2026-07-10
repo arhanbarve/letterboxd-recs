@@ -89,15 +89,21 @@ def create_app(
         conn = get_conn()
         rows = conn.execute(
             "SELECT f.tmdb_id, f.title, f.year, f.poster_path, f.backdrop_path,"
+            " f.imdb_rating, f.rt_score, f.tmdb_vote_avg,"
             " r.match_pct, r.predicted_rating, r.why"
             " FROM recommendations r JOIN films f ON f.tmdb_id = r.film_id"
             " WHERE r.username = ?"
             " ORDER BY r.match_pct DESC", (username,)).fetchall()
+        def starring(fid):
+            return [c["actor"] for c in conn.execute(
+                "SELECT actor FROM film_cast WHERE film_id = ? LIMIT 3", (fid,)).fetchall()]
         return [{
             "tmdb_id": r["tmdb_id"], "title": r["title"], "year": r["year"],
             "poster_path": r["poster_path"], "backdrop_path": r["backdrop_path"],
-            "match_pct": r["match_pct"],
-            "predicted_rating": r["predicted_rating"],
+            "match_pct": r["match_pct"], "predicted_rating": r["predicted_rating"],
+            "imdb_rating": r["imdb_rating"], "rt_score": r["rt_score"],
+            "vote_avg": r["tmdb_vote_avg"],
+            "starring": starring(r["tmdb_id"]),
             "why": json.loads(r["why"]) if r["why"] else {"neighbors": [], "connection": None},
         } for r in rows]
 
@@ -171,7 +177,7 @@ def create_app(
         conn = get_conn()
         row = conn.execute(
             "SELECT tmdb_id, title, year, runtime, director, overview,"
-            " poster_path, backdrop_path, tmdb_vote_avg"
+            " poster_path, backdrop_path, tmdb_vote_avg, imdb_rating, rt_score"
             " FROM films WHERE tmdb_id = ?", (tmdb_id,)).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="Film not found")
@@ -183,7 +189,8 @@ def create_app(
             "tmdb_id": row["tmdb_id"], "title": row["title"], "year": row["year"],
             "runtime": row["runtime"], "director": row["director"], "overview": row["overview"],
             "poster_path": row["poster_path"], "backdrop_path": row["backdrop_path"],
-            "vote_avg": row["tmdb_vote_avg"], "genres": genres, "cast": cast,
+            "vote_avg": row["tmdb_vote_avg"], "imdb_rating": row["imdb_rating"],
+            "rt_score": row["rt_score"], "genres": genres, "cast": cast,
         }
 
     return app

@@ -44,6 +44,26 @@ def test_get_recommendations_returns_cards(tmp_path):
     assert body[0]["poster_path"] == "/r.jpg"
     assert body[0]["backdrop_path"] == "/rb.jpg"
 
+def test_recommendations_include_starring_and_ratings(tmp_path):
+    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn.execute(
+        "INSERT INTO films (tmdb_id,title,year,poster_path,backdrop_path,overview,runtime,director,"
+        "tmdb_vote_avg,imdb_rating,rt_score)"
+        " VALUES (1,'A',2010,'/a.jpg','/ab.jpg','A pitch.',100,'Dir',7.9,8.1,90)")
+    conn.execute("INSERT INTO film_cast VALUES (1,'Actor One',101)")
+    conn.execute("INSERT INTO film_cast VALUES (1,'Actor Two',102)")
+    conn.execute("INSERT INTO film_cast VALUES (1,'Actor Three',103)")
+    conn.execute("INSERT INTO film_cast VALUES (1,'Actor Four',104)")
+    conn.execute("INSERT INTO recommendations VALUES ('u', 1, 92.0, 4.1, NULL, 'now')")
+    conn.commit()
+    app = create_app(conn_factory=lambda: conn, refresh_fn=lambda conn, username=None, on_progress=None, cancel_event=None: None)
+    client = TestClient(app)
+    row = client.get("/api/recommendations", params={"username": "u"}).json()[0]
+    assert row["starring"] == ["Actor One", "Actor Two", "Actor Three"]
+    assert row["imdb_rating"] == 8.1
+    assert row["rt_score"] == 90
+    assert row["vote_avg"] == 7.9
+
 def test_get_recommendations_scoped_by_username(tmp_path):
     conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed(conn)
     app = create_app(conn_factory=lambda: conn, refresh_fn=lambda conn, username=None, on_progress=None, cancel_event=None: None)
