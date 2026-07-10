@@ -296,11 +296,22 @@ input:focus-visible,
   font-size: 13px;
 }
 
-.card-why {
-  color: var(--muted);
-  font-style: italic;
-  font-size: 12px;
-  margin-top: 8px;
+.card { perspective: 900px; }
+.card-inner {
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transform-style: preserve-3d;
+  transition: transform 120ms var(--ease-out-expo);
+}
+.card:hover { box-shadow: 0 18px 40px -12px rgba(212,169,74,0.35); border-color: var(--accent); }
+.card-poster { position: relative; }
+.rating-badge {
+  position: absolute; top: 8px; left: 8px; font-size: 11px; font-weight: 700;
+  padding: 3px 7px; border-radius: 6px; background: rgba(0,0,0,0.72);
+  color: var(--accent); backdrop-filter: blur(4px);
+}
+.card-starring { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.3; }
+@media (prefers-reduced-motion: reduce) {
+  .card-inner { transform: none !important; transition: none; }
 }
 
 .last-updated {
