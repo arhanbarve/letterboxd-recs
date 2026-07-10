@@ -110,7 +110,10 @@ class _FakePage:
     def __init__(self, browser):
         self._browser = browser
     def goto(self, url, wait_until=None, timeout=None):
-        return _FakeResp(self._browser._statuses.pop(0))
+        item = self._browser._statuses.pop(0)
+        if isinstance(item, Exception):
+            raise item  # simulate a Playwright navigation failure (dead proxy, DNS, timeout)
+        return _FakeResp(item)
     def wait_for_timeout(self, ms):
         pass
     def content(self):
@@ -219,6 +222,23 @@ def test_default_get_blocked_error_suggests_retrying(monkeypatch):
     _install_fake_browser(monkeypatch, [403, 403, 403, 403], content="x")
     with pytest.raises(RuntimeError, match="try again in a minute"):
         scraper.default_get("https://letterboxd.com/alice/films/")
+
+def test_default_get_retries_when_goto_raises_then_succeeds(monkeypatch):
+    # A dead/rotated proxy makes page.goto raise net::ERR_PROXY_CONNECTION_FAILED
+    # instead of returning a status. That must be retried like a transient
+    # block, not crash the whole refresh with a raw Playwright error.
+    err = RuntimeError("Page.goto: net::ERR_PROXY_CONNECTION_FAILED")
+    fb = _install_fake_browser(monkeypatch, [err, 200])
+    assert scraper.default_get("https://letterboxd.com/alice/films/") == "<html>ok</html>"
+    assert fb.contexts_opened == 2
+    assert fb.contexts_closed == 2
+
+def test_default_get_raises_friendly_error_when_goto_always_raises(monkeypatch):
+    err = RuntimeError("Page.goto: net::ERR_PROXY_CONNECTION_FAILED")
+    fb = _install_fake_browser(monkeypatch, [err, err, err, err])
+    with pytest.raises(RuntimeError, match="try again in a minute"):
+        scraper.default_get("https://letterboxd.com/alice/films/")
+    assert fb.contexts_closed == 4  # no context leaked on the exception path
 
 def test_default_get_closes_context_if_new_page_raises(monkeypatch):
     # page creation can fail (browser process disconnected, etc.) — the

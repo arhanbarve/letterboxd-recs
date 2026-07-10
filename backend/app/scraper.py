@@ -137,6 +137,7 @@ def default_get(url: str, on_request=None) -> str:
     browser = _get_browser()
     backoffs = [2, 5, 10]
     last_status = None
+    last_error = None
     for attempt, wait in enumerate([0] + backoffs):
         if wait:
             time.sleep(wait)
@@ -148,8 +149,18 @@ def default_get(url: str, on_request=None) -> str:
         try:
             page = context.new_page()
             t0 = time.monotonic()
-            resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(2500)
+            try:
+                resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(2500)
+            except Exception as e:
+                # A navigation-level failure throws here instead of returning a
+                # status: a dead or rotated proxy (net::ERR_PROXY_CONNECTION_FAILED
+                # when the bore tunnel's port has moved), DNS, or a nav timeout.
+                # Treat it like a transient block — back off and retry on a fresh
+                # context — rather than letting the raw Playwright error escape
+                # and surface to the user as "Refresh failed".
+                last_error = e
+                continue
             dt = time.monotonic() - t0
             last_status = resp.status
             body = page.content()
@@ -160,8 +171,9 @@ def default_get(url: str, on_request=None) -> str:
                 return body
         finally:
             context.close()
+    reason = f"status {last_status}" if last_status is not None else f"network error ({last_error})"
     raise RuntimeError(
-        f"Blocked fetching {url}: status {last_status} after {len(backoffs)} "
+        f"Blocked fetching {url}: {reason} after {len(backoffs)} "
         f"retries. Letterboxd's bot protection refused the crawl — try again "
         f"in a minute."
     )
