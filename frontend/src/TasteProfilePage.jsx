@@ -22,7 +22,7 @@ function RatingHistogram({ distribution }) {
     <div className="rating-histogram">
       {distribution.map((b) => (
         <div key={b.star} className="histogram-bar" style={{ height: `${(b.count / max) * 100}%` }}>
-          <span>{b.star}★</span>
+          <span>{b.star}</span>
         </div>
       ))}
     </div>

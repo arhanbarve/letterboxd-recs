@@ -643,12 +643,12 @@ input:focus-visible,
 .long-shots-section { margin-top: 24px; }
 
 /* Taste dashboard */
-.taste-dashboard { max-width: 900px; }
+.taste-dashboard { max-width: 960px; margin: 0 auto; }
 .dashboard-eyebrow-row {
-  display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px;
+  display: flex; align-items: baseline; justify-content: space-between; margin: 28px 0 28px;
 }
 .dashboard-eyebrow {
-  font-family: var(--font-display); letter-spacing: 0.22em; font-size: 15px;
+  font-family: var(--font-display); letter-spacing: 0.14em; font-size: 30px;
   color: var(--accent);
 }
 .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 28px; }
@@ -657,16 +657,17 @@ input:focus-visible,
 .stat-label { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; margin-top: 4px; }
 
 .dashboard-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 28px; margin-bottom: 28px; }
-.section-title { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+.section-title { font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 0 0 16px; }
+.people-wall-section .section-title, .taste-dashboard .section-title { color: var(--ink); }
 
-.rating-histogram { display: flex; align-items: flex-end; gap: 8px; height: 110px; }
+.rating-histogram { display: flex; align-items: flex-end; gap: 5px; height: 110px; }
 .histogram-bar {
   flex: 1; background: linear-gradient(180deg, var(--accent), var(--accent-dim));
   border-radius: 3px 3px 0 0; position: relative; min-height: 4px;
 }
 .histogram-bar span {
-  position: absolute; bottom: -20px; left: 0; right: 0; text-align: center;
-  font-size: 11px; color: var(--muted);
+  position: absolute; bottom: -18px; left: 0; right: 0; text-align: center;
+  font-size: 9px; color: var(--muted);
 }
 .signature-line {
   margin-top: 26px; padding: 14px 16px; border-left: 3px solid var(--accent);
