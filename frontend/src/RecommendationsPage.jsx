@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { getRecommendations, getLastUpdated } from "./api";
 import { useRefresh } from "./context/RefreshContext";
-import RefreshButton from "./components/RefreshButton";
+import { partitionRecs } from "./lib/recList";
 import RecommendationCard from "./components/RecommendationCard";
 import ProgressBar from "./components/ProgressBar";
 import MarqueeTrio from "./components/MarqueeTrio";
-import FilmDetailModal from "./components/FilmDetailModal";
+import ExpandedFilmCard from "./components/ExpandedFilmCard";
 import LastUpdated from "./components/LastUpdated";
+
+const LONG_SHOT_PAGE = 50;
 
 function SkeletonGrid({ count = 6 }) {
   return (
@@ -27,7 +29,7 @@ export default function RecommendationsPage({ username }) {
   const [error, setError] = useState(null);
   const [selectedFilm, setSelectedFilm] = useState(null);
   const [updatedAt, setUpdatedAt] = useState(null);
-  const { status, isRunning, start, cancel, lastCompletedAt } = useRefresh();
+  const { status, isRunning, lastCompletedAt } = useRefresh();
 
   const load = async () => {
     if (!username) return;
@@ -64,44 +66,13 @@ export default function RecommendationsPage({ username }) {
     }
   }, [status]);
 
-  const onRefresh = async () => {
-    if (!username) {
-      setError("Enter your Letterboxd username above before refreshing.");
-      return;
-    }
-    setError(null);
-    await start();
-  };
-
-  const LONG_SHOT_THRESHOLD = 70;
-  const PAGE_SIZE = 25;
-
-  const trio = recs ? recs.slice(0, 3) : [];
-  const remaining = recs ? recs.slice(3) : [];
-  const mainList = remaining.filter((r) => r.match_pct >= LONG_SHOT_THRESHOLD);
-  const longShots = remaining.filter((r) => r.match_pct < LONG_SHOT_THRESHOLD);
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const visibleMain = mainList.slice(0, visibleCount);
-  const [showLongShots, setShowLongShots] = useState(false);
-
-  useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-    setShowLongShots(false);
-  }, [recs]);
-
-  const hasData = !!(recs && recs.length > 0);
+  const { hero, main, longShots } = recs ? partitionRecs(recs) : { hero: [], main: [], longShots: [] };
+  const [longShown, setLongShown] = useState(0); // start collapsed
+  useEffect(() => { setLongShown(0); }, [recs]);
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <h2 style={{ fontSize: 15, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)", fontFamily: "var(--font-body)" }}>
-          Recommendations
-        </h2>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <LastUpdated iso={updatedAt} />
-          <RefreshButton loading={isRunning} hasData={hasData} onClick={onRefresh} onCancel={cancel} />
-        </div>
-      </div>
+      <LastUpdated iso={updatedAt} />
 
       {isRunning && <ProgressBar />}
 
@@ -128,40 +99,40 @@ export default function RecommendationsPage({ username }) {
         </div>
       )}
 
-      <MarqueeTrio recs={trio} onSelect={setSelectedFilm} />
+      <MarqueeTrio recs={hero} onSelect={setSelectedFilm} />
 
-      {visibleMain.length > 0 && (
+      {main.length > 0 && (
         <div className="grid">
-          {visibleMain.map((r, i) => (
+          {main.map((r, i) => (
             <RecommendationCard rec={r} index={i} key={r.tmdb_id} onSelect={setSelectedFilm} />
           ))}
         </div>
       )}
 
-      {visibleCount < mainList.length && (
-        <button className="show-more-button" onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}>
-          Show {Math.min(PAGE_SIZE, mainList.length - visibleCount)} more
-        </button>
-      )}
-
       {longShots.length > 0 && (
         <div className="long-shots-section">
-          <button className="long-shots-toggle" onClick={() => setShowLongShots((s) => !s)}>
-            {showLongShots ? "Hide" : "Show"} long shots ({longShots.length} below {LONG_SHOT_THRESHOLD}% match)
-          </button>
-          {showLongShots && (
-            <div className="grid">
-              {longShots.map((r, i) => (
-                <RecommendationCard rec={r} index={i} key={r.tmdb_id} onSelect={setSelectedFilm} />
-              ))}
-            </div>
+          {longShown === 0 ? (
+            <button className="long-shots-toggle" onClick={() => setLongShown(LONG_SHOT_PAGE)}>
+              Load long shots ({longShots.length})
+            </button>
+          ) : (
+            <>
+              <div className="grid">
+                {longShots.slice(0, longShown).map((r, i) => (
+                  <RecommendationCard rec={r} index={i} key={r.tmdb_id} onSelect={setSelectedFilm} />
+                ))}
+              </div>
+              {longShown < longShots.length && (
+                <button className="long-shots-toggle" onClick={() => setLongShown((n) => n + LONG_SHOT_PAGE)}>
+                  Load 50 more
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
 
-      {selectedFilm && (
-        <FilmDetailModal film={selectedFilm} onClose={() => setSelectedFilm(null)} />
-      )}
+      {selectedFilm && <ExpandedFilmCard film={selectedFilm} onClose={() => setSelectedFilm(null)} />}
     </div>
   );
 }
