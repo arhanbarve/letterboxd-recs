@@ -16,7 +16,9 @@ function TrioPanel({ rec, rank, onSelect }) {
         <div className="trio-title">
           {rec.title} <span className="trio-year">({rec.year})</span>
         </div>
-        <div className="trio-match">{Math.round(rec.match_pct)}% match</div>
+        <div className="trio-match">
+          {Math.round(rec.match_pct)}% match · {rec.predicted_rating?.toFixed(1)}★ predicted
+        </div>
       </div>
     </div>
   );
@@ -26,7 +28,7 @@ export default function MarqueeTrio({ recs, onSelect }) {
   if (!recs || recs.length === 0) return null;
   return (
     <div className="marquee-trio-section">
-      <div className="marquee-eyebrow">Tonight's Marquee</div>
+      <div className="marquee-eyebrow">Tonight's Feature</div>
       <div className="marquee-trio">
         {recs.map((rec, i) => (
           <TrioPanel key={rec.tmdb_id} rec={rec} rank={i + 1} onSelect={onSelect} />
