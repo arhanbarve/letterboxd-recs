@@ -204,6 +204,14 @@ input:focus-visible,
   to { opacity: 1; transform: translateY(0); }
 }
 
+.control-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin: 8px 0 40px;
+  padding: 14px 16px; border: 1px solid var(--border);
+  border-radius: 12px; background: var(--surface);
+}
+.control-bar .username-field { padding: 0; }
+
 /* ---------- Recommendation grid ---------- */
 
 .grid {
