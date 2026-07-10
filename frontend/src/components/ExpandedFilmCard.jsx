@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { getFilmDetail, getWatchProviders } from "../api";
 import { ratingBadge } from "../lib/ratingBadge";
 
@@ -31,13 +32,18 @@ export default function ExpandedFilmCard({ film, onClose }) {
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";  // lock background scroll while open
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
   }, [onClose]);
 
   const badge = ratingBadge({ ...film, ...(detail || {}) });
   const hasProviders = providers && (providers.flatrate.length || providers.rent.length || providers.buy.length);
 
-  return (
+  return createPortal(
     <div className="expand-backdrop" onClick={onClose}>
       <div className="expand-card" role="dialog" aria-modal="true" aria-label={`${film.title} details`}
            onClick={(e) => e.stopPropagation()}>
@@ -80,6 +86,7 @@ export default function ExpandedFilmCard({ film, onClose }) {
           {providers?.link && <a className="modal-link" href={providers.link} target="_blank" rel="noreferrer">View all options →</a>}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

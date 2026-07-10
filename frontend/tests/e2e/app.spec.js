@@ -7,10 +7,11 @@
 // Run with:  E2E_USERNAME=<USER> npm run e2e
 import { test, expect } from "@playwright/test";
 
-const USER = process.env.E2E_USERNAME || "arhanbarve";
+const USER = process.env.E2E_USERNAME || "moviefan";
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript((u) => localStorage.setItem("letterboxd_username", JSON.stringify(u)), USER);
+  // useLocalStorage stores plain strings (no JSON) — must match that format.
+  await page.addInitScript((u) => localStorage.setItem("letterboxd_username", u), USER);
 });
 
 test("header + one-line control bar render", async ({ page }) => {
