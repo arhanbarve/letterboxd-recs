@@ -9,6 +9,7 @@ class Config:
     username: str
     tmdb_api_key: str
     db_path: str
+    omdb_api_key: str = ""
     cors_origins: list[str] = field(default_factory=lambda: ["http://localhost:5173"])
 
 def load_config() -> Config:
@@ -17,5 +18,6 @@ def load_config() -> Config:
         username=os.environ.get("LETTERBOXD_USERNAME", ""),
         tmdb_api_key=os.environ["TMDB_API_KEY"],
         db_path=os.environ.get("DB_PATH", "letterboxd.db"),
+        omdb_api_key=os.environ.get("OMDB_API_KEY", ""),
         cors_origins=[o.strip() for o in origins.split(",")],
     )
