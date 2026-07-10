@@ -10,9 +10,10 @@ def _rated_films(conn, username):
     return rows
 
 def _rating_distribution(rows):
-    buckets = {star: 0 for star in range(1, 6)}
+    buckets = {round(0.5 * i, 1): 0 for i in range(1, 11)}  # 0.5 .. 5.0
     for r in rows:
-        star = max(1, min(5, int(r["your_rating"] + 0.5)))  # round half up, not banker's rounding
+        star = round(r["your_rating"] * 2) / 2
+        star = max(0.5, min(5.0, star))
         buckets[star] += 1
     return [{"star": s, "count": c} for s, c in sorted(buckets.items())]
 
@@ -23,25 +24,44 @@ def _favorite_decade(rows):
             counts[r["decade"]] = counts.get(r["decade"], 0) + 1
     return max(counts, key=counts.get) if counts else None
 
+def _person_top_films(conn, username, id_col, id_value, cast_join=False):
+    if cast_join:
+        sql = ("SELECT f.title, f.year, f.poster_path, r.your_rating AS rating"
+               " FROM film_cast t JOIN films f ON f.tmdb_id = t.film_id"
+               " JOIN ratings r ON r.film_id = t.film_id"
+               " WHERE r.username = ? AND t.person_id = ?"
+               " ORDER BY r.your_rating DESC LIMIT 3")
+    else:
+        sql = ("SELECT f.title, f.year, f.poster_path, r.your_rating AS rating"
+               " FROM films f JOIN ratings r ON r.film_id = f.tmdb_id"
+               " WHERE r.username = ? AND f.director_id = ?"
+               " ORDER BY r.your_rating DESC LIMIT 3")
+    return [{"title": x["title"], "year": x["year"], "poster_path": x["poster_path"],
+             "rating": x["rating"]} for x in conn.execute(sql, (username, id_value)).fetchall()]
+
 def _top_people(conn, username, role_table, role_col, person_col):
     rows = conn.execute(
-        f"SELECT p.name, p.profile_path, COUNT(*) c"
+        f"SELECT p.name, p.profile_path, t.{person_col} AS pid, COUNT(*) c"
         f" FROM {role_table} t"
         f" JOIN ratings r ON r.film_id = t.film_id"
         f" JOIN people p ON p.person_id = t.{person_col}"
         f" WHERE r.username = ? AND t.{person_col} IS NOT NULL"
         f" GROUP BY t.{person_col} ORDER BY c DESC LIMIT 6", (username,)).fetchall()
-    return [{"name": r["name"], "profile_path": r["profile_path"], "count": r["c"]} for r in rows]
+    return [{"name": r["name"], "profile_path": r["profile_path"], "count": r["c"],
+             "top_films": _person_top_films(conn, username, person_col, r["pid"], cast_join=True)}
+            for r in rows]
 
 def _top_directors(conn, username):
     rows = conn.execute(
-        "SELECT p.name, p.profile_path, COUNT(*) c"
+        "SELECT p.name, p.profile_path, f.director_id AS pid, COUNT(*) c"
         " FROM films f"
         " JOIN ratings r ON r.film_id = f.tmdb_id"
         " JOIN people p ON p.person_id = f.director_id"
         " WHERE r.username = ? AND f.director_id IS NOT NULL"
         " GROUP BY f.director_id ORDER BY c DESC LIMIT 6", (username,)).fetchall()
-    return [{"name": r["name"], "profile_path": r["profile_path"], "count": r["c"]} for r in rows]
+    return [{"name": r["name"], "profile_path": r["profile_path"], "count": r["c"],
+             "top_films": _person_top_films(conn, username, "director_id", r["pid"], cast_join=False)}
+            for r in rows]
 
 def _genre_affinities(profile):
     return [{"name": g, "affinity": round(v, 3)} for g, v in

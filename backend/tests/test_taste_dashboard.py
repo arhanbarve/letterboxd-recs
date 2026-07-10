@@ -34,12 +34,28 @@ def test_build_dashboard_favorite_decade(tmp_path):
     dash = build_dashboard(conn, "alice")
     assert dash["favorite_decade"] == 2010
 
-def test_build_dashboard_rating_distribution_buckets_by_whole_star(tmp_path):
+def test_rating_distribution_uses_half_star_buckets():
+    from app.taste_dashboard import _rating_distribution
+    rows = [{"your_rating": 4.5}, {"your_rating": 4.5}, {"your_rating": 3.0}, {"your_rating": 0.5}]
+    dist = _rating_distribution(rows)
+    assert [b["star"] for b in dist] == [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
+    by = {b["star"]: b["count"] for b in dist}
+    assert by[4.5] == 2 and by[3.0] == 1 and by[0.5] == 1
+
+def test_build_dashboard_rating_distribution_buckets_by_half_star(tmp_path):
     conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed_alice(conn)
     dash = build_dashboard(conn, "alice")
     dist = {b["star"]: b["count"] for b in dash["rating_distribution"]}
-    assert dist[5] == 2  # 5.0 and 4.5 both round up into the 5-star bucket
-    assert dist[2] == 1
+    assert dist[5.0] == 1 and dist[4.5] == 1  # 5.0 and 4.5 now land in separate half-star buckets
+    assert dist[2.0] == 1
+
+def test_top_directors_include_top_films(tmp_path):
+    conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed_alice(conn)
+    dash = build_dashboard(conn, "alice")
+    d0 = dash["top_directors"][0]
+    assert "top_films" in d0 and len(d0["top_films"]) <= 3
+    assert d0["top_films"] == sorted(d0["top_films"], key=lambda f: f["rating"], reverse=True)
+    assert {"title", "year", "rating", "poster_path"} <= set(d0["top_films"][0])
 
 def test_build_dashboard_top_director_has_headshot(tmp_path):
     conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed_alice(conn)
