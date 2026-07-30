@@ -101,22 +101,37 @@ def related_ids(tmdb_id: int, api_key: str, session=None, pages: int = 1) -> lis
 def search_movie(title: str, year: int | None, api_key: str, session=None) -> int | None:
     """Resolve a TMDB id from title+year. Exact title (+year) wins; else any
     result with a matching year; else None (caller falls through to the next
-    resolution layer)."""
-    params = {"api_key": api_key, "query": title}
-    if year:
-        params["primary_release_year"] = year
-    data = _get(session, f"{API}/search/movie", params)
-    results = data.get("results", [])
+    resolution layer).
 
+    When the requested year finds nothing, the year is retried +1, -1 and then
+    dropped entirely — Letterboxd records a film's *premiere* year while TMDB
+    records its primary *release* year, so a one-year offset is routine
+    (Insidious: Letterboxd 2010, TMDB 2011-03-31). Those retries demand an exact
+    title match, since a neighbouring year is not evidence about the film the
+    way the requested year is."""
     def _year(r):
         rd = r.get("release_date") or ""
         return int(rd[:4]) if len(rd) >= 4 and rd[:4].isdigit() else None
 
-    for r in results:
-        if r.get("title", "").lower() == title.lower() and (year is None or _year(r) == year):
-            return r["id"]
-    if year is not None:
+    def attempt(y, exact_only):
+        params = {"api_key": api_key, "query": title}
+        if y:
+            params["primary_release_year"] = y
+        results = _get(session, f"{API}/search/movie", params).get("results", [])
         for r in results:
-            if _year(r) == year:
+            if r.get("title", "").lower() == title.lower() and (y is None or _year(r) == y):
                 return r["id"]
+        if not exact_only and y is not None:
+            for r in results:
+                if _year(r) == y:
+                    return r["id"]
+        return None
+
+    tmdb_id = attempt(year, exact_only=False)
+    if tmdb_id is not None or year is None:
+        return tmdb_id
+    for offset_year in (year + 1, year - 1, None):
+        tmdb_id = attempt(offset_year, exact_only=True)
+        if tmdb_id is not None:
+            return tmdb_id
     return None

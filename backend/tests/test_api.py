@@ -1,9 +1,10 @@
+import inspect
 import json
 import threading
 import time
 from fastapi.testclient import TestClient
 from app.api import create_app
-from app.db import connect, init_schema
+from app.db import connect, init_schema, load_imported_films
 
 def _wait_until(cond, timeout=1.0, interval=0.01):
     start = time.time()
@@ -250,42 +251,155 @@ def test_cancel_event_cleared_when_new_run_starts(tmp_path):
     _wait_until(lambda: len(seen_cancel_states) == 2)
     assert seen_cancel_states[1] is False  # fresh event for the new run, not the old cancelled one
 
-def test_real_refresh_builds_cascade_and_scrapes_without_detail_pages(monkeypatch, tmp_path):
-    """_real_refresh must inject a resolve_ids cascade into scrape_profile:
-    cache + rss + search + detail. We stub every network layer and assert the
-    scrape resolves via rss/search and persists to the slug cache."""
+def _noop_refresh(conn, username=None, on_progress=None, cancel_event=None):
+    return None
+
+def _client(conn):
+    return TestClient(create_app(conn_factory=lambda: conn, refresh_fn=_noop_refresh))
+
+def _upload(client, data, filename="letterboxd-moviefan-2026-07-30-19-33-utc.zip", **form):
+    return client.post("/api/import", files={"file": (filename, data, "application/zip")},
+                       data=form)
+
+def test_post_import_stores_films_and_returns_counts():
+    from tests.test_importer import sample_zip
+    conn = _mem_conn()
+    resp = _upload(_client(conn), sample_zip(
+        ratings_rows=("2026-02-05,Parasite,2019,https://boxd.it/293w,5\n"
+                      "2026-02-06,Cats,2019,https://boxd.it/xxx,1\n"),
+        watched_rows="2026-02-07,Unrated,2020,https://boxd.it/yyy\n"))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["username"] == "moviefan"
+    assert body["imported"] == 3
+    assert body["rated"] == 2
+    assert body["imported_at"]
+    assert load_imported_films(conn, "moviefan")[0]["title"] == "Parasite"
+
+def test_post_import_replaces_a_previous_import():
+    from tests.test_importer import sample_zip
+    conn = _mem_conn()
+    client = _client(conn)
+    _upload(client, sample_zip(ratings_rows="2026-02-05,Old,2019,https://boxd.it/old,5\n",
+                               watched_rows=""))
+    _upload(client, sample_zip(ratings_rows="2026-02-05,New,2020,https://boxd.it/new,4\n",
+                               watched_rows=""))
+    assert [f["title"] for f in load_imported_films(conn, "moviefan")] == ["New"]
+
+def test_post_import_falls_back_to_the_submitted_username():
+    from tests.test_importer import RATINGS_HEADER, make_zip
+    conn = _mem_conn()
+    data = make_zip(**{"ratings.csv": RATINGS_HEADER + "2026-02-05,P,2019,https://boxd.it/a,5\n"})
+    resp = _upload(_client(conn), data, username="typed_name")
+    assert resp.status_code == 200
+    assert resp.json()["username"] == "typed_name"
+
+def test_post_import_400s_when_no_username_can_be_determined():
+    from tests.test_importer import RATINGS_HEADER, make_zip
+    data = make_zip(**{"ratings.csv": RATINGS_HEADER + "2026-02-05,P,2019,https://boxd.it/a,5\n"})
+    resp = _upload(_client(_mem_conn()), data)
+    assert resp.status_code == 400
+    assert "username" in resp.json()["detail"].lower()
+
+def test_post_import_400s_on_a_non_zip_upload():
+    resp = _upload(_client(_mem_conn()), b"Name,Year\nParasite,2019\n", filename="ratings.csv")
+    assert resp.status_code == 400
+    assert "zip" in resp.json()["detail"]
+
+def test_post_import_400s_when_ratings_csv_is_missing():
+    from tests.test_importer import PROFILE, make_zip
+    resp = _upload(_client(_mem_conn()), make_zip(**{"profile.csv": PROFILE}))
+    assert resp.status_code == 400
+    assert "ratings.csv" in resp.json()["detail"]
+
+def test_get_import_status_reports_the_stored_import():
+    from tests.test_importer import sample_zip
+    conn = _mem_conn()
+    client = _client(conn)
+    _upload(client, sample_zip())
+    body = client.get("/api/import/status", params={"username": "moviefan"}).json()
+    assert body["imported"] == 1
+    assert body["rated"] == 1
+    assert body["imported_at"]
+
+def test_get_import_status_is_empty_before_any_import():
+    body = _client(_mem_conn()).get("/api/import/status", params={"username": "nobody"}).json()
+    assert body == {"imported": 0, "rated": 0, "imported_at": None}
+
+def _real_refresh_env(monkeypatch, tmp_path, conn, search_results):
+    """Wires _real_refresh up with every network layer stubbed, and captures the
+    films its resolve_fn produced."""
     import app.api as api_mod
     from app.config import Config
-    from app.db import connect, init_schema, lookup_slug_tmdb
-
-    conn = connect(":memory:")
-    init_schema(conn)
 
     monkeypatch.setattr(api_mod, "load_config", lambda: Config(
-        username="alice", tmdb_api_key="KEY", db_path=str(tmp_path / "x.db")))
-    monkeypatch.setattr(api_mod, "fetch_rss", lambda user, get_html=None: "<rss/>")
-    monkeypatch.setattr(api_mod, "parse_rss_tmdb_map", lambda xml: {"parasite": 496243})
-    monkeypatch.setattr(api_mod, "search_movie", lambda title, year, key: 555)
+        username="moviefan", tmdb_api_key="KEY", db_path=str(tmp_path / "x.db")))
+    monkeypatch.setattr(api_mod, "search_movie",
+                        lambda title, year, key: search_results.get(title))
 
     captured = {}
-    def fake_scrape_profile(user, get_html=None, delay=1.0, on_progress=None,
-                            should_cancel=None, resolve_ids=None):
-        entries = [
-            {"slug": "parasite", "title": "Parasite", "year": 2019, "rating": 5.0},
-            {"slug": "cats", "title": "Cats", "year": 2019, "rating": 1.0},
-        ]
-        resolve_ids(entries, on_progress=on_progress, should_cancel=should_cancel)
-        captured["entries"] = entries
-        return [e for e in entries if e["tmdb_id"] is not None]
-    monkeypatch.setattr(api_mod, "scrape_profile", fake_scrape_profile)
-
     def fake_run_refresh(conn_, cfg, deps, on_progress=None, cancel_event=None):
-        deps.scrape_fn(cfg.username, on_progress=None, should_cancel=None)
+        films = deps.load_films_fn(cfg.username)
+        deps.resolve_fn(films, on_progress=lambda n: None, should_cancel=None)
+        captured["films"] = films
     monkeypatch.setattr(api_mod, "run_refresh", fake_run_refresh)
+    api_mod._real_refresh(conn, "moviefan")
+    return captured["films"]
 
-    api_mod._real_refresh(conn, "alice")
+def test_real_refresh_resolves_imported_films_via_tmdb_search(monkeypatch, tmp_path):
+    from tests.test_importer import sample_zip
+    from app.db import lookup_slug_tmdb
 
-    by_slug = {e["slug"]: e for e in captured["entries"]}
-    assert by_slug["parasite"]["tmdb_id"] == 496243   # via rss
-    assert by_slug["cats"]["tmdb_id"] == 555          # via search
-    assert lookup_slug_tmdb(conn, "cats") == (555,)   # persisted to cache
+    conn = _mem_conn()
+    _upload(_client(conn), sample_zip(
+        ratings_rows=("2026-02-05,Parasite,2019,https://boxd.it/293w,5\n"
+                      "2026-02-06,Obscure Short,1974,https://boxd.it/zzz,3\n"),
+        watched_rows=""))
+
+    films = _real_refresh_env(monkeypatch, tmp_path, conn, {"Parasite": 496243})
+    by_key = {f["slug"]: f for f in films}
+    assert by_key["293w"]["tmdb_id"] == 496243
+    assert by_key["zzz"]["tmdb_id"] is None            # unmatched, dropped downstream
+    assert lookup_slug_tmdb(conn, "293w") == (496243,)  # cached under the boxd.it code
+    # written back so the row records its own resolution
+    assert load_imported_films(conn, "moviefan")[0]["tmdb_id"] == 496243
+
+def test_real_refresh_reuses_the_cache_on_a_second_run(monkeypatch, tmp_path):
+    from tests.test_importer import sample_zip
+
+    conn = _mem_conn()
+    _upload(_client(conn), sample_zip(
+        ratings_rows="2026-02-05,Parasite,2019,https://boxd.it/293w,5\n", watched_rows=""))
+    _real_refresh_env(monkeypatch, tmp_path, conn, {"Parasite": 496243})
+
+    # search now returns nothing: a second run must still resolve, from cache
+    films = _real_refresh_env(monkeypatch, tmp_path, conn, {})
+    assert films[0]["tmdb_id"] == 496243
+
+def test_real_refresh_never_imports_a_scraper():
+    import app.api as api_mod
+    source = inspect.getsource(api_mod)
+    assert "scraper" not in source and "playwright" not in source.lower()
+
+def test_cors_origin_regex_allows_matching_preview_origins():
+    app = create_app(conn_factory=_mem_conn, refresh_fn=_noop_refresh,
+                     cors_origins=("https://reel.example.com",),
+                     cors_origin_regex=r"https://reel-.*\.vercel\.app")
+    client = TestClient(app)
+    resp = client.options("/api/import", headers={
+        "Origin": "https://reel-git-abc123.vercel.app",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type",
+    })
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == "https://reel-git-abc123.vercel.app"
+
+def test_cors_still_rejects_unrelated_origins():
+    app = create_app(conn_factory=_mem_conn, refresh_fn=_noop_refresh,
+                     cors_origins=("https://reel.example.com",),
+                     cors_origin_regex=r"https://reel-.*\.vercel\.app")
+    resp = TestClient(app).options("/api/import", headers={
+        "Origin": "https://evil.example.com",
+        "Access-Control-Request-Method": "POST",
+    })
+    assert "access-control-allow-origin" not in resp.headers

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { refresh, getRefreshStatus, cancelRefresh } from "../api";
 
-const ACTIVE_STAGES = new Set(["starting", "scraping", "enriching", "profiling", "scoring"]);
+const ACTIVE_STAGES = new Set(["starting", "resolving", "enriching", "profiling", "scoring"]);
 const TERMINAL_STAGES = new Set(["done", "cancelled", "error"]);
 const POLL_MS = 800;
 

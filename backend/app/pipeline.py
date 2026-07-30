@@ -12,11 +12,19 @@ FALLBACK_THRESHOLD = 3.5
 TOP_PEOPLE_COUNT = 5
 OMDB_TOP_N = 80
 
+# Candidate generation fans out ~3 pages of TMDB "related" per seed film, and
+# every candidate then costs one enrich call. Left uncapped, a full imported
+# watch history turns a ~3-minute refresh into an hours-long one, so both ends
+# are bounded: the seeds we expand from, and the pool they may grow to.
+MAX_SEED_FILMS = 50
+MAX_CANDIDATE_POOL = 5000
+
 @dataclass
 class Deps:
-    scrape_fn: callable   # (username, on_progress=None, should_cancel=None) -> list[{slug,title,rating,tmdb_id}]
+    load_films_fn: callable  # (username) -> list[{slug,title,year,rating,rated_date,tmdb_id}]
     enrich_fn: callable   # (tmdb_id, api_key) -> metadata dict
     related_fn: callable  # (tmdb_id, api_key) -> list[int]
+    resolve_fn: callable = None  # (films, on_progress=, should_cancel=) -> fills tmdb_id in place
     person_search_fn: callable = None   # (name, api_key) -> person_id | None
     person_discover_fn: callable = None  # (person_id, api_key) -> list[int]
     omdb_fn: callable = None  # (imdb_id) -> {"imdb_rating","rt_score"}
@@ -28,11 +36,17 @@ def _check_cancel(cancel_event):
     if cancel_event is not None and cancel_event.is_set():
         raise Cancelled()
 
-def _liked_ids(rated_meta):
-    liked = [m["tmdb_id"] for m in rated_meta if m["rating"] >= LIKED_THRESHOLD]
+def _liked_ids(rated_meta, max_seeds=MAX_SEED_FILMS):
+    """The films the candidate pool is grown from: your highest-rated first, and
+    among equal ratings the most recently rated. Capped so pool size (and so
+    refresh runtime) stays bounded no matter how large the import is."""
+    liked = [m for m in rated_meta if m["rating"] >= LIKED_THRESHOLD]
     if len(liked) < 3:
-        liked = [m["tmdb_id"] for m in rated_meta if m["rating"] >= FALLBACK_THRESHOLD]
-    return liked
+        liked = [m for m in rated_meta if m["rating"] >= FALLBACK_THRESHOLD]
+    # two stable sorts == order by (rating desc, rated_date desc)
+    liked.sort(key=lambda m: m.get("rated_date") or "", reverse=True)
+    liked.sort(key=lambda m: m["rating"], reverse=True)
+    return [m["tmdb_id"] for m in liked[:max_seeds]]
 
 def _top_people(profile, n=TOP_PEOPLE_COUNT):
     directors = sorted(profile["director"].items(), key=lambda kv: kv[1], reverse=True)
@@ -73,42 +87,63 @@ def _persist_film(conn, m):
 def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> None:
     on_progress = on_progress or _noop
 
-    on_progress({"stage": "scraping", "current": 0, "total": None,
-                 "message": "Scraping your Letterboxd ratings..."})
-    scraped = deps.scrape_fn(
-        cfg.username,
-        on_progress=lambda n: on_progress({
-            "stage": "scraping", "current": n, "total": None,
-            "message": f"Scraping your Letterboxd ratings... {n} found",
-        }),
-        should_cancel=lambda: cancel_event is not None and cancel_event.is_set(),
-    )
+    films = deps.load_films_fn(cfg.username)
+    if not films:
+        raise RuntimeError(
+            "No films imported yet. Download your Letterboxd export "
+            "(Settings -> Data -> Export Your Data) and upload the zip first.")
 
-    rated_meta = []
+    # Unlike the old scrape, the film count is known before any network work, so
+    # this stage reports a real fraction instead of an estimated creep.
+    total = len(films)
+    on_progress({"stage": "resolving", "current": 0, "total": total,
+                 "message": f"Matching your films to TMDB... 0/{total}"})
+    if deps.resolve_fn:
+        deps.resolve_fn(
+            films,
+            on_progress=lambda n: on_progress({
+                "stage": "resolving", "current": n, "total": total,
+                "message": f"Matching your films to TMDB... {n}/{total}",
+            }),
+            should_cancel=lambda: cancel_event is not None and cancel_event.is_set(),
+        )
+    _check_cancel(cancel_event)
+
+    # A film with no TMDB id can never be scored or recommended against, so it is
+    # dropped — counted, not silently swallowed (reported in the done message).
+    matched = [f for f in films if f.get("tmdb_id") is not None]
+    skipped = total - len(matched)
+    rated = [f for f in matched if f.get("rating") is not None]
+
     conn.execute("DELETE FROM ratings WHERE username=?", (cfg.username,))
     conn.execute("DELETE FROM watched WHERE username=?", (cfg.username,))
-    total = len(scraped)
-    for i, f in enumerate(scraped):
+    conn.executemany("INSERT OR REPLACE INTO watched (username,film_id) VALUES (?,?)",
+                     [(cfg.username, f["tmdb_id"]) for f in matched])
+
+    # Only rated films are enriched: an unrated-but-watched film contributes
+    # nothing except its id to the exclusion set, and nothing joins watched to
+    # films, so paying an enrich call for it would buy nothing.
+    rated_meta = []
+    rated_total = len(rated)
+    for i, f in enumerate(rated):
         _check_cancel(cancel_event)
-        on_progress({"stage": "enriching", "current": i, "total": total,
-                     "message": f"Fetching film details... {i}/{total}"})
+        on_progress({"stage": "enriching", "current": i, "total": rated_total,
+                     "message": f"Fetching film details... {i}/{rated_total}"})
         m = deps.enrich_fn(f["tmdb_id"], cfg.tmdb_api_key)
         _persist_film(conn, m)
-        conn.execute("INSERT OR REPLACE INTO watched (username,film_id) VALUES (?,?)",
-                     (cfg.username, f["tmdb_id"]))
-        if f["rating"] is not None:
-            conn.execute(
-                "INSERT OR REPLACE INTO ratings (username,film_id,your_rating) VALUES (?,?,?)",
-                (cfg.username, f["tmdb_id"], f["rating"]))
-            rm = dict(m); rm["rating"] = f["rating"]
-            rated_meta.append(rm)
+        conn.execute(
+            "INSERT OR REPLACE INTO ratings (username,film_id,your_rating) VALUES (?,?,?)",
+            (cfg.username, f["tmdb_id"], f["rating"]))
+        rm = dict(m); rm["rating"] = f["rating"]; rm["rated_date"] = f.get("rated_date")
+        rated_meta.append(rm)
 
     on_progress({"stage": "profiling", "current": 0, "total": None,
                  "message": "Building your taste profile..."})
     profile = build_taste_profile(rated_meta)
-    watched_ids = {f["tmdb_id"] for f in scraped}
+    watched_ids = {f["tmdb_id"] for f in matched}
     pool = build_candidate_pool(_liked_ids(rated_meta), watched_ids,
-                                cfg.tmdb_api_key, related_fn=deps.related_fn)
+                                cfg.tmdb_api_key, related_fn=deps.related_fn,
+                                max_pool=MAX_CANDIDATE_POOL)
 
     if deps.person_search_fn and deps.person_discover_fn:
         on_progress({"stage": "profiling", "current": 0, "total": None,
@@ -116,6 +151,7 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> N
         pool |= build_person_candidate_pool(
             _top_people(profile), watched_ids, cfg.tmdb_api_key,
             search_person_fn=deps.person_search_fn, discover_fn=deps.person_discover_fn,
+            max_pool=max(0, MAX_CANDIDATE_POOL - len(pool)),
         )
 
     cand_total = len(pool)
@@ -151,5 +187,8 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> N
             (cfg.username, r["tmdb_id"], r["match_pct"], r["predicted_rating"],
              json.dumps(r["why"]), now))
     conn.commit()
-    on_progress({"stage": "done", "current": total, "total": total,
-                 "message": "Done"})
+    message = f"Done — {len(matched)} films matched"
+    if skipped:
+        message += f", {skipped} skipped"
+    on_progress({"stage": "done", "current": len(matched), "total": total,
+                 "message": message})

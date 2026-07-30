@@ -3,7 +3,7 @@ import { computePercent, computeEtaSec, monotonicPercent, formatClock, STAGE_BAN
 
 describe("STAGE_BANDS", () => {
   it("covers every pipeline stage with a non-overlapping, ascending band", () => {
-    const order = ["scraping", "enriching", "profiling", "scoring", "done"];
+    const order = ["resolving", "enriching", "profiling", "scoring", "done"];
     let prevCeil = 0;
     for (const stage of order) {
       const [floor, ceil] = STAGE_BANDS[stage];
@@ -32,10 +32,10 @@ describe("computePercent", () => {
     expect(pct).toBeCloseTo(floor + (3 / 12) * (ceil - floor), 5);
   });
 
-  it("creeps toward but never reaches the scraping band ceiling as time passes", () => {
-    const [, ceil] = STAGE_BANDS.scraping;
-    const early = computePercent({ stage: "scraping", current: 0, total: null }, { stageElapsedMs: 1000 });
-    const later = computePercent({ stage: "scraping", current: 0, total: null }, { stageElapsedMs: 120000 });
+  it("creeps toward but never reaches the resolving band ceiling as time passes", () => {
+    const [, ceil] = STAGE_BANDS.resolving;
+    const early = computePercent({ stage: "resolving", current: 0, total: null }, { stageElapsedMs: 1000 });
+    const later = computePercent({ stage: "resolving", current: 0, total: null }, { stageElapsedMs: 120000 });
     expect(later).toBeGreaterThan(early);
     expect(later).toBeLessThan(ceil);
   });
@@ -58,8 +58,8 @@ describe("computePercent", () => {
   });
 
   it("never drops below the stage floor even with negative stageElapsedMs", () => {
-    const [floor] = STAGE_BANDS.scraping;
-    const pct = computePercent({ stage: "scraping", current: 0, total: null }, { stageElapsedMs: -1000 });
+    const [floor] = STAGE_BANDS.resolving;
+    const pct = computePercent({ stage: "resolving", current: 0, total: null }, { stageElapsedMs: -1000 });
     expect(pct).toBeGreaterThanOrEqual(floor);
   });
 });
@@ -72,8 +72,8 @@ describe("monotonicPercent", () => {
 
   it("holds steady across a full scripted run", () => {
     const sequence = [
-      { stage: "scraping", current: 0, total: null, stageElapsedMs: 0 },
-      { stage: "scraping", current: 0, total: null, stageElapsedMs: 5000 },
+      { stage: "resolving", current: 0, total: null, stageElapsedMs: 0 },
+      { stage: "resolving", current: 0, total: null, stageElapsedMs: 5000 },
       { stage: "enriching", current: 0, total: 20, stageElapsedMs: 0 },
       { stage: "enriching", current: 10, total: 20, stageElapsedMs: 5000 },
       { stage: "enriching", current: 20, total: 20, stageElapsedMs: 10000 },

@@ -1,9 +1,9 @@
-"""Layered TMDB-id resolution for scraped Letterboxd films.
+"""Layered TMDB-id resolution for a user's Letterboxd films.
 
 Order, first hit wins:  cache -> rss -> tmdb search -> letterboxd detail page.
-The detail layer is the only one that touches Letterboxd and is hard-capped so
-a run can never approach Cloudflare's ~72-request wall (the root cause of the
-old deterministic 403 — see the 2026-07-08 resilient-scraper design spec).
+Every layer is optional. The import path (see app.importer) supplies only the
+cache and search layers, so resolution never touches Letterboxd at all; the rss
+and detail layers remain for any caller that has a film slug to work with.
 """
 from dataclasses import dataclass
 

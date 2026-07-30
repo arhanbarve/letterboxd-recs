@@ -34,7 +34,9 @@ test("clicking a card expands to center; Esc closes", async ({ page }) => {
   await page.goto("/");
   await page.locator(".card").first().click();
   await expect(page.locator(".expand-card")).toBeVisible();
-  await expect(page.locator(".expand-hero")).toBeVisible();
+  // Not .expand-hero: it only renders when TMDB has a backdrop for the film, and
+  // plenty of obscure titles have none.
+  await expect(page.locator(".expand-title")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator(".expand-card")).toHaveCount(0);
 });

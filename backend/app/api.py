@@ -1,19 +1,19 @@
 import dataclasses
 import json
 import threading
-import time
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import load_config
-from app.db import connect, init_schema, lookup_slug_tmdb, store_slug_tmdb
+from app.db import (connect, init_schema, import_status, load_imported_films,
+                    lookup_slug_tmdb, replace_imported_films,
+                    set_imported_tmdb_id, store_slug_tmdb)
 from app.errors import Cancelled
+from app.importer import ExportParseError, parse_export
 from app.omdb import fetch_ratings
 from app.pipeline import run_refresh, Deps
 from app.resolver import make_resolver
-from app.rss import fetch_rss, parse_rss_tmdb_map
-from app.scraper import BASE, default_get, parse_tmdb_id, scrape_profile
 from app.tmdb import (enrich, related_ids, search_movie, watch_providers,
                       search_person, discover_by_person)
 from app.taste_dashboard import build_dashboard
@@ -30,25 +30,33 @@ def _real_refresh(conn, username=None, on_progress=None, cancel_event=None):
     if username:
         cfg = dataclasses.replace(cfg, username=username)
 
-    def detail_fn(slug):
-        tid = parse_tmdb_id(default_get(f"{BASE}/film/{slug}/"))
-        time.sleep(1.0)  # pace the capped Letterboxd fallback — see resolver.MAX_DETAIL_FALLBACKS
-        return tid
+    def load_films(user):
+        # "slug" is the export's boxd.it shortcode — the resolver and the
+        # film_slug_tmdb cache both just need a stable per-film key.
+        return [{"slug": f["boxd_id"], "title": f["title"], "year": f["year"],
+                 "rating": f["rating"], "rated_date": f["rated_date"],
+                 "tmdb_id": f["tmdb_id"]}
+                for f in load_imported_films(conn, user)]
 
-    def scrape(user, on_progress=None, should_cancel=None):
-        rss_xml = fetch_rss(user, get_html=default_get)
+    def resolve(films, on_progress=None, should_cancel=None):
+        """cache -> TMDB title+year search, and nothing else. No request reaches
+        Letterboxd: the export carries no film slug (only a boxd.it shortlink),
+        and expanding those would mean crawling Letterboxd again — the exact
+        Cloudflare-blocked path the import replaced."""
         resolve_ids = make_resolver(
-            cache_get=lambda slug: lookup_slug_tmdb(conn, slug),
-            cache_put=lambda slug, tid, via: store_slug_tmdb(conn, slug, tid, via),
-            rss_map=parse_rss_tmdb_map(rss_xml) if rss_xml else {},
+            cache_get=lambda key: lookup_slug_tmdb(conn, key),
+            cache_put=lambda key, tid, via: store_slug_tmdb(conn, key, tid, via),
             search_fn=lambda title, year: search_movie(title, year, cfg.tmdb_api_key),
-            detail_fn=detail_fn,
+            detail_fn=None,
         )
-        return scrape_profile(user, on_progress=on_progress,
-                              should_cancel=should_cancel, resolve_ids=resolve_ids)
+        resolve_ids(films, on_progress=on_progress, should_cancel=should_cancel)
+        for film in films:
+            set_imported_tmdb_id(conn, cfg.username, film["slug"], film["tmdb_id"])
+        conn.commit()
 
     deps = Deps(
-        scrape_fn=scrape,
+        load_films_fn=load_films,
+        resolve_fn=resolve,
         enrich_fn=lambda tid, key: enrich(tid, key),
         related_fn=lambda tid, key: related_ids(tid, key, pages=3),
         person_search_fn=lambda name, key: search_person(name, key),
@@ -59,11 +67,12 @@ def _real_refresh(conn, username=None, on_progress=None, cancel_event=None):
 
 def create_app(
     conn_factory=None, refresh_fn=_real_refresh, watch_providers_fn=_real_watch_providers,
-    cors_origins=("http://localhost:5173",),
+    cors_origins=("http://localhost:5173",), cors_origin_regex=None,
 ) -> FastAPI:
     app = FastAPI()
     app.add_middleware(
         CORSMiddleware, allow_origins=list(cors_origins),
+        allow_origin_regex=cors_origin_regex,
         allow_methods=["*"], allow_headers=["*"])
 
     progress_lock = threading.Lock()
@@ -107,6 +116,26 @@ def create_app(
             "why": json.loads(r["why"]) if r["why"] else {"neighbors": [], "connection": None},
         } for r in rows]
 
+    @app.post("/api/import")
+    def import_export(file: UploadFile = File(...), username: str | None = Form(None)):
+        try:
+            parsed = parse_export(file.file.read())
+        except ExportParseError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from None
+        owner = parsed["username"] or username
+        if not owner:
+            raise HTTPException(
+                status_code=400,
+                detail="That export has no profile.csv, so we can't tell whose it "
+                       "is — type your Letterboxd username and upload again.")
+        conn = get_conn()
+        replace_imported_films(conn, owner, parsed["films"])
+        return {"username": owner, **import_status(conn, owner)}
+
+    @app.get("/api/import/status")
+    def get_import_status(username: str):
+        return import_status(get_conn(), username)
+
     @app.get("/api/taste-profile")
     def taste_profile(username: str):
         conn = get_conn()
@@ -120,7 +149,7 @@ def create_app(
             (username,)).fetchone()
         return {"last_updated": row["ts"]}
 
-    ACTIVE_STAGES = {"starting", "scraping", "enriching", "profiling", "scoring"}
+    ACTIVE_STAGES = {"starting", "resolving", "enriching", "profiling", "scoring"}
 
     def _launch_refresh(username, starting_message):
         set_progress = make_set_progress(username)
@@ -195,4 +224,5 @@ def create_app(
 
     return app
 
-app = create_app(cors_origins=load_config().cors_origins)
+_cfg = load_config()
+app = create_app(cors_origins=_cfg.cors_origins, cors_origin_regex=_cfg.cors_origin_regex)

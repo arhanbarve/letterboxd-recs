@@ -1,4 +1,6 @@
-from app.db import connect, init_schema, lookup_slug_tmdb, store_slug_tmdb
+from app.db import (connect, init_schema, lookup_slug_tmdb, store_slug_tmdb,
+                    replace_imported_films, load_imported_films,
+                    set_imported_tmdb_id, import_status)
 
 def test_init_schema_creates_tables(tmp_path):
     db = str(tmp_path / "t.db")
@@ -81,3 +83,73 @@ def test_slug_tmdb_cache_upsert_overwrites():
     store_slug_tmdb(conn, "parasite", None, "none")
     store_slug_tmdb(conn, "parasite", 496243, "detail")
     assert lookup_slug_tmdb(conn, "parasite") == (496243,)
+
+def _films(*rows):
+    return [{"boxd_id": b, "title": t, "year": y, "rating": r, "rated_date": d}
+            for b, t, y, r, d in rows]
+
+def _fresh():
+    conn = connect(":memory:")
+    init_schema(conn)
+    return conn
+
+def test_init_schema_creates_imported_films_table():
+    conn = _fresh()
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "imported_films" in tables
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(imported_films)").fetchall()}
+    assert cols == {"username", "boxd_id", "title", "year", "rating",
+                    "rated_date", "tmdb_id", "imported_at"}
+
+def test_imported_films_roundtrip():
+    conn = _fresh()
+    replace_imported_films(conn, "alice", _films(
+        ("293w", "Parasite", 2019, 5.0, "2026-02-05"),
+        ("wUow", "Aftersun", 2022, None, "2026-02-06"),
+    ), imported_at="2026-07-30T00:00:00Z")
+    films = load_imported_films(conn, "alice")
+    assert [(f["boxd_id"], f["title"], f["year"], f["rating"]) for f in films] == [
+        ("293w", "Parasite", 2019, 5.0),
+        ("wUow", "Aftersun", 2022, None),
+    ]
+    assert all(f["tmdb_id"] is None for f in films)  # unresolved until a refresh
+
+def test_replace_imported_films_wipes_previous_import():
+    conn = _fresh()
+    replace_imported_films(conn, "alice", _films(("old1", "Gone", 1999, 3.0, None)))
+    replace_imported_films(conn, "alice", _films(("new1", "Kept", 2020, 4.0, None)))
+    assert [f["boxd_id"] for f in load_imported_films(conn, "alice")] == ["new1"]
+
+def test_replace_imported_films_only_touches_that_username():
+    conn = _fresh()
+    replace_imported_films(conn, "bob", _films(("b1", "Bob's Film", 2001, 4.0, None)))
+    replace_imported_films(conn, "alice", _films(("a1", "Alice's Film", 2002, 5.0, None)))
+    assert [f["boxd_id"] for f in load_imported_films(conn, "bob")] == ["b1"]
+
+def test_replace_imported_films_upserts_duplicate_boxd_ids():
+    conn = _fresh()
+    replace_imported_films(conn, "alice", _films(
+        ("293w", "Parasite", 2019, 5.0, None),
+        ("293w", "Parasite", 2019, 4.0, None),
+    ))
+    assert len(load_imported_films(conn, "alice")) == 1
+
+def test_set_imported_tmdb_id_persists_resolution():
+    conn = _fresh()
+    replace_imported_films(conn, "alice", _films(("293w", "Parasite", 2019, 5.0, None)))
+    set_imported_tmdb_id(conn, "alice", "293w", 496243)
+    assert load_imported_films(conn, "alice")[0]["tmdb_id"] == 496243
+
+def test_import_status_counts_films_and_ratings():
+    conn = _fresh()
+    replace_imported_films(conn, "alice", _films(
+        ("a", "Rated", 2019, 5.0, None),
+        ("b", "Also rated", 2020, 3.5, None),
+        ("c", "Unrated", 2021, None, None),
+    ), imported_at="2026-07-30T00:00:00Z")
+    assert import_status(conn, "alice") == {
+        "imported": 3, "rated": 2, "imported_at": "2026-07-30T00:00:00Z"}
+
+def test_import_status_when_nothing_imported():
+    assert import_status(_fresh(), "nobody") == {
+        "imported": 0, "rated": 0, "imported_at": None}

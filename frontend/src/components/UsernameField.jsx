@@ -1,9 +1,13 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function UsernameField({ value, onChange }) {
   const [draft, setDraft] = useState(value);
   const [saved, setSaved] = useState(false);
   const timeoutRef = useRef();
+
+  // draft is only an edit buffer — when the username changes from outside (an
+  // import reads the real one from profile.csv), the field must follow.
+  useEffect(() => { setDraft(value); }, [value]);
 
   const commit = () => {
     const trimmed = draft.trim();

@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, timezone
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS films (
@@ -26,6 +27,14 @@ CREATE TABLE IF NOT EXISTS film_slug_tmdb (
     slug TEXT PRIMARY KEY,
     tmdb_id INTEGER,
     resolved_via TEXT
+);
+CREATE TABLE IF NOT EXISTS imported_films (
+    username TEXT, boxd_id TEXT, title TEXT, year INTEGER,
+    rating REAL,       -- NULL = watched but unrated
+    rated_date TEXT,   -- ratings.csv Date, orders the scoring seeds
+    tmdb_id INTEGER,   -- filled in during a refresh; NULL until then
+    imported_at TEXT,
+    PRIMARY KEY (username, boxd_id)
 );
 """
 
@@ -70,3 +79,37 @@ def store_slug_tmdb(conn: sqlite3.Connection, slug: str, tmdb_id: int | None, vi
         "INSERT OR REPLACE INTO film_slug_tmdb (slug, tmdb_id, resolved_via) VALUES (?,?,?)",
         (slug, tmdb_id, via))
     conn.commit()  # cache must survive a later run failure
+
+def replace_imported_films(conn: sqlite3.Connection, username: str, films: list[dict],
+                           imported_at: str | None = None) -> None:
+    """Overwrites this username's imported films. A Letterboxd export is a full
+    snapshot, so replacing is the correct semantic — merging would resurrect
+    films you have since deleted from your Letterboxd account."""
+    imported_at = imported_at or datetime.now(timezone.utc).isoformat()
+    conn.execute("DELETE FROM imported_films WHERE username=?", (username,))
+    conn.executemany(
+        "INSERT OR REPLACE INTO imported_films"
+        " (username, boxd_id, title, year, rating, rated_date, tmdb_id, imported_at)"
+        " VALUES (?,?,?,?,?,?,NULL,?)",
+        [(username, f["boxd_id"], f["title"], f["year"], f["rating"],
+          f.get("rated_date"), imported_at) for f in films])
+    conn.commit()
+
+def load_imported_films(conn: sqlite3.Connection, username: str) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        "SELECT boxd_id, title, year, rating, rated_date, tmdb_id"
+        " FROM imported_films WHERE username=? ORDER BY rowid", (username,)).fetchall()]
+
+def set_imported_tmdb_id(conn: sqlite3.Connection, username: str, boxd_id: str,
+                         tmdb_id: int | None) -> None:
+    conn.execute("UPDATE imported_films SET tmdb_id=? WHERE username=? AND boxd_id=?",
+                 (tmdb_id, username, boxd_id))
+
+def import_status(conn: sqlite3.Connection, username: str) -> dict:
+    row = conn.execute(
+        "SELECT COUNT(*) AS imported,"
+        " COUNT(rating) AS rated,"
+        " MAX(imported_at) AS imported_at"
+        " FROM imported_films WHERE username=?", (username,)).fetchone()
+    return {"imported": row["imported"], "rated": row["rated"],
+            "imported_at": row["imported_at"]}

@@ -11,6 +11,9 @@ class Config:
     db_path: str
     omdb_api_key: str = ""
     cors_origins: list[str] = field(default_factory=lambda: ["http://localhost:5173"])
+    # Preview deployments get a fresh hostname every push, so an exact-origin
+    # list can never cover them — a pattern can (e.g. https://.*\.vercel\.app).
+    cors_origin_regex: str | None = None
 
 def load_config() -> Config:
     origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173")
@@ -20,4 +23,5 @@ def load_config() -> Config:
         db_path=os.environ.get("DB_PATH", "letterboxd.db"),
         omdb_api_key=os.environ.get("OMDB_API_KEY", ""),
         cors_origins=[o.strip() for o in origins.split(",")],
+        cors_origin_regex=os.environ.get("CORS_ORIGIN_REGEX") or None,
     )

@@ -39,3 +39,14 @@ def test_load_config_omdb_key_optional(monkeypatch):
     monkeypatch.delenv("OMDB_API_KEY", raising=False)
     from app.config import load_config
     assert load_config().omdb_api_key == ""
+
+def test_load_config_reads_cors_origin_regex(monkeypatch):
+    monkeypatch.setenv("TMDB_API_KEY", "key123")
+    monkeypatch.setenv("CORS_ORIGIN_REGEX", r"https://.*\.vercel\.app")
+    cfg = load_config()
+    assert cfg.cors_origin_regex == r"https://.*\.vercel\.app"
+
+def test_load_config_cors_origin_regex_defaults_to_none(monkeypatch):
+    monkeypatch.delenv("CORS_ORIGIN_REGEX", raising=False)
+    monkeypatch.setenv("TMDB_API_KEY", "key123")
+    assert load_config().cors_origin_regex is None

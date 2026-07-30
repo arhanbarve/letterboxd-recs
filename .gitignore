@@ -9,3 +9,4 @@ dist/
 .superpowers/
 .claude/
 .playwright-mcp/
+test-results/

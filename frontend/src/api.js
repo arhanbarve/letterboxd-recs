@@ -5,6 +5,23 @@ export async function getRecommendations(username) {
   return r.json();
 }
 
+export async function importExport(file, username) {
+  const form = new FormData();
+  form.append("file", file);
+  if (username) form.append("username", username);
+  const r = await fetch(`${BASE}/api/import`, { method: "POST", body: form });
+  const body = await r.json().catch(() => ({}));
+  // The backend's 400s are written to be shown as-is ("No ratings.csv inside
+  // that zip...") — surface them rather than a generic failure.
+  if (!r.ok) throw new Error(body.detail || "Couldn't read that file. Try again.");
+  return body;
+}
+
+export async function getImportStatus(username) {
+  const r = await fetch(`${BASE}/api/import/status?username=${encodeURIComponent(username)}`);
+  return r.json();
+}
+
 export async function getTasteProfile(username) {
   const r = await fetch(`${BASE}/api/taste-profile?username=${encodeURIComponent(username)}`);
   return r.json();

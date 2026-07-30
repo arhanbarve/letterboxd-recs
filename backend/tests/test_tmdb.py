@@ -248,3 +248,62 @@ def test_search_movie_without_year_requires_exact_title():
 def test_search_movie_empty_results_returns_none():
     responses.add(responses.GET, SEARCH_URL, json={"results": []})
     assert search_movie("Nothing", 2020, "KEY") is None
+
+# Letterboxd records a film's *premiere* year, TMDB its primary *release* year,
+# so a one-year offset is routine (Insidious: Letterboxd 2010, TMDB 2011-03-31).
+# Confirmed live 2026-07-30: 2 of 92 films in a real export failed on this alone.
+
+def _year_param(call):
+    return call.request.params.get("primary_release_year")
+
+@responses.activate
+def test_search_movie_retries_one_year_later():
+    responses.add(responses.GET, SEARCH_URL, json={"results": []})
+    responses.add(responses.GET, SEARCH_URL, json={"results": [
+        {"id": 49018, "title": "Insidious", "release_date": "2011-03-31"},
+    ]})
+    assert search_movie("Insidious", 2010, "KEY") == 49018
+    assert [_year_param(c) for c in responses.calls] == ["2010", "2011"]
+
+@responses.activate
+def test_search_movie_retries_one_year_earlier():
+    responses.add(responses.GET, SEARCH_URL, json={"results": []})
+    responses.add(responses.GET, SEARCH_URL, json={"results": []})
+    responses.add(responses.GET, SEARCH_URL, json={"results": [
+        {"id": 5, "title": "Persona", "release_date": "2013-08-01"},
+    ]})
+    assert search_movie("Persona", 2014, "KEY") == 5
+    assert [_year_param(c) for c in responses.calls] == ["2014", "2015", "2013"]
+
+@responses.activate
+def test_search_movie_falls_back_to_unfiltered_year():
+    responses.add(responses.GET, SEARCH_URL, json={"results": []})
+    responses.add(responses.GET, SEARCH_URL, json={"results": []})
+    responses.add(responses.GET, SEARCH_URL, json={"results": []})
+    responses.add(responses.GET, SEARCH_URL, json={"results": [
+        {"id": 284303, "title": "Goodnight Mommy", "release_date": "2015-01-08"},
+    ]})
+    assert search_movie("Goodnight Mommy", 2014, "KEY") == 284303
+    assert _year_param(responses.calls[3]) is None
+
+@responses.activate
+def test_search_movie_year_fallbacks_require_exact_title():
+    # The loose "any result with a matching year" rule applies only to the
+    # requested year — a neighbouring year must not match a different film.
+    responses.add(responses.GET, SEARCH_URL, json={"results": []})
+    responses.add(responses.GET, SEARCH_URL, json={"results": [
+        {"id": 99, "title": "Some Other Film", "release_date": "2011-05-05"},
+    ]})
+    assert search_movie("Insidious", 2010, "KEY") is None
+
+@responses.activate
+def test_search_movie_stops_after_four_attempts():
+    responses.add(responses.GET, SEARCH_URL, json={"results": []})
+    assert search_movie("Nonexistent", 1999, "KEY") is None
+    assert len(responses.calls) == 4
+
+@responses.activate
+def test_search_movie_without_year_makes_a_single_request():
+    responses.add(responses.GET, SEARCH_URL, json={"results": []})
+    assert search_movie("Nonexistent", None, "KEY") is None
+    assert len(responses.calls) == 1

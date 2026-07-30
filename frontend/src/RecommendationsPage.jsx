@@ -7,6 +7,7 @@ import ProgressBar from "./components/ProgressBar";
 import MarqueeTrio from "./components/MarqueeTrio";
 import ExpandedFilmCard from "./components/ExpandedFilmCard";
 import LastUpdated from "./components/LastUpdated";
+import ImportPanel from "./components/ImportPanel";
 
 const LONG_SHOT_PAGE = 50;
 
@@ -24,12 +25,13 @@ function SkeletonGrid({ count = 6 }) {
   );
 }
 
-export default function RecommendationsPage({ username }) {
+export default function RecommendationsPage({ username, importStatus, onImported }) {
   const [recs, setRecs] = useState(null);
   const [error, setError] = useState(null);
   const [selectedFilm, setSelectedFilm] = useState(null);
   const [updatedAt, setUpdatedAt] = useState(null);
   const { status, isRunning, lastCompletedAt } = useRefresh();
+  const hasImport = (importStatus?.imported ?? 0) > 0;
 
   const load = async () => {
     if (!username) return;
@@ -83,19 +85,17 @@ export default function RecommendationsPage({ username }) {
         </div>
       )}
 
-      {!username && (
-        <div className="empty-state">
-          <h3>Enter your Letterboxd username</h3>
-          <p>Add it above, then click "Load my data" to generate recommendations.</p>
-        </div>
-      )}
+      {!hasImport && <ImportPanel username={username} onImported={onImported} />}
 
-      {username && recs === null && <SkeletonGrid />}
+      {hasImport && recs === null && <SkeletonGrid />}
 
-      {username && recs !== null && recs.length === 0 && !isRunning && (
+      {hasImport && recs !== null && recs.length === 0 && !isRunning && (
         <div className="empty-state">
           <h3>No recommendations yet</h3>
-          <p>Click "Load my data" to scrape your Letterboxd ratings and generate picks.</p>
+          <p>
+            {importStatus.imported} films imported. Click "Generate recommendations" to
+            score them and build your picks.
+          </p>
         </div>
       )}
 

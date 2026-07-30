@@ -4,7 +4,7 @@ import { useRefresh } from "../context/RefreshContext";
 
 const STAGE_LABELS = {
   starting: "Starting...",
-  scraping: "Scraping your Letterboxd ratings",
+  resolving: "Matching your films to TMDB",
   enriching: "Fetching film details",
   profiling: "Building your taste profile",
   scoring: "Scoring candidates",
@@ -13,7 +13,7 @@ const STAGE_LABELS = {
   error: "Something went wrong",
 };
 
-const STEP_INDEX = { starting: 1, scraping: 1, enriching: 2, profiling: 3, scoring: 4, done: 4 };
+const STEP_INDEX = { starting: 1, resolving: 1, enriching: 2, profiling: 3, scoring: 4, done: 4 };
 const TOTAL_STEPS = 4;
 
 export default function ProgressBar() {
@@ -56,9 +56,9 @@ export default function ProgressBar() {
           {etaSec !== null && <span> · ~{formatClock(etaSec)} left</span>}
         </div>
       )}
-      {stage === "scraping" && (
+      {stage === "resolving" && (
         <div className="progress-note">
-          Letterboxd throttles scraping — roughly 3–4s per film, longer for bigger profiles.
+          Each film is looked up on TMDB once, then cached — later refreshes skip this step.
         </div>
       )}
       {message && stage === "error" && <div className="progress-error">{message}</div>}
