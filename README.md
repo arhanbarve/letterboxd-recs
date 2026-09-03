@@ -69,28 +69,46 @@ backend with `RATE_LIMIT_IMPORTS_PER_HOUR=1000` while iterating.
 
 ## Deploying so friends can use it
 
-Two pieces: backend on **Railway**, frontend on **Vercel**. Both have free tiers sufficient for a small friend group.
+Two pieces: backend on **Fly.io**, frontend on **Vercel**.
 
-### Backend (Railway)
+The backend is a single uvicorn process reading a SQLite file, so it needs a host
+that offers a **persistent volume** — without one, every redeploy wipes the
+imports and everyone has to upload their zip again. That requirement is what
+rules out most free tiers.
 
-1. Create a Railway account and project, connect this repo, set the service root to `backend/`.
-2. Railway auto-detects `backend/railway.json` (installs deps; starts uvicorn on Railway's assigned port).
-3. Add a **persistent volume** to the service (Railway dashboard → your service → Settings → Volumes), mounted at a path like `/data`. Set the env var `DB_PATH=/data/letterboxd.db` so the SQLite file survives redeploys. **Without this, every redeploy wipes your import** and you have to upload the zip again.
-4. Set environment variables on the Railway service:
-   - `TMDB_API_KEY` — your TMDB key
-   - `OMDB_API_KEY` — optional, adds IMDb/Rotten Tomatoes scores to the top results
-   - `DB_PATH` — `/data/letterboxd.db` (matching the volume mount)
-   - `CORS_ORIGINS` — your Vercel frontend URL once you have it (comma-separate multiple origins if needed)
-   - `CORS_ORIGIN_REGEX` — optional pattern so Vercel preview deployments (a new hostname per push) aren't rejected by CORS. **Anchor it** with `^` and `$`, e.g. `^https://your-project(-[a-z0-9]+-[a-z0-9-]+)?\.vercel\.app$` — an unanchored `.*\.vercel\.app` lets any site hosted on Vercel call your API
-5. Deploy. Note the public Railway URL (e.g. `https://your-app.up.railway.app`).
+### Backend (Fly.io)
+
+`backend/fly.toml` and `backend/Dockerfile` are committed, so this is mostly
+already done. From `backend/`:
+
+```bash
+flyctl auth login
+flyctl launch --no-deploy          # reuses the committed fly.toml; pick your own app name
+flyctl volumes create letterboxd_data --size 1 --region iad
+flyctl secrets set TMDB_API_KEY=... OMDB_API_KEY=...
+flyctl deploy
+```
+
+`fly.toml` already sets `DB_PATH=/data/letterboxd.db` to match the volume mount,
+plus `CORS_ORIGINS` and an anchored `CORS_ORIGIN_REGEX`. Edit those to your own
+Vercel URL. **Anchor the regex** with `^` and `$` — an unanchored
+`.*\.vercel\.app` lets any site hosted on Vercel call your API.
+
+Only the API keys go through `flyctl secrets`; `fly.toml` is committed, so
+nothing secret belongs in it.
+
+The machine suspends when idle and wakes on the next request, which is what
+keeps it inside the free allowance — expect a second or two on the first request
+after a nap. Because SQLite lives on a volume, exactly one machine may run; do
+not scale it out.
 
 ### Frontend (Vercel)
 
 1. Create a Vercel account, import this repo, set the project root to `frontend/`.
-2. Vercel auto-detects Vite. Set the environment variable `VITE_API_BASE_URL` to your Railway backend URL from above.
+2. Vercel auto-detects Vite. Set the environment variable `VITE_API_BASE_URL` to your Fly backend URL (e.g. `https://your-app.fly.dev`).
 3. Deploy. Share the resulting Vercel URL with friends — each person uploads their own export, and everyone's data stays isolated on the shared backend.
 
-If the deployed app reports "Failed to fetch", it is almost always one of those two settings: `VITE_API_BASE_URL` missing on Vercel (the frontend then calls `127.0.0.1`), or the Vercel origin missing from `CORS_ORIGINS` on Railway.
+If the deployed app reports "Failed to fetch", it is almost always one of those two settings: `VITE_API_BASE_URL` missing on Vercel (the frontend then calls `127.0.0.1`), or the Vercel origin missing from `CORS_ORIGINS` on the backend.
 
 ### Notes
 
