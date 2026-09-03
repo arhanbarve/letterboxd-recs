@@ -20,8 +20,18 @@ class Config:
     imports_per_hour: int = 20
     refreshes_per_hour: int = 10
 
+class MissingConfig(RuntimeError):
+    """Startup failed for a reason the operator can fix. The message is written
+    to be read in a deploy log with no other context."""
+
 def load_config() -> Config:
     origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173")
+    if not os.environ.get("TMDB_API_KEY"):
+        raise MissingConfig(
+            "TMDB_API_KEY is not set. Locally: copy backend/.env.example to "
+            "backend/.env and fill it in. On a host: set it as an environment "
+            "variable. A free v3 key comes from "
+            "https://www.themoviedb.org/settings/api")
     return Config(
         imports_per_hour=int(os.environ.get("RATE_LIMIT_IMPORTS_PER_HOUR", "20")),
         refreshes_per_hour=int(os.environ.get("RATE_LIMIT_REFRESHES_PER_HOUR", "10")),

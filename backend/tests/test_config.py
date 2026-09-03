@@ -1,3 +1,5 @@
+import pytest
+
 from app.config import load_config
 
 def test_load_config_reads_env(monkeypatch):
@@ -81,3 +83,11 @@ def test_rate_limits_default_to_safe_ceilings(monkeypatch):
     cfg = load_config()
     assert cfg.imports_per_hour == 20
     assert cfg.refreshes_per_hour == 10
+
+def test_missing_tmdb_key_explains_how_to_fix_it(monkeypatch):
+    """A fresh clone has no .env, and the old bare KeyError said nothing about
+    what to do about it."""
+    from app.config import MissingConfig, load_config
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    with pytest.raises(MissingConfig, match="\\.env\\.example"):
+        load_config()
