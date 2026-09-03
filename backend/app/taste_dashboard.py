@@ -6,7 +6,7 @@ def _rated_films(conn, username):
     rows = conn.execute(
         "SELECT f.tmdb_id, f.decade, r.your_rating"
         " FROM ratings r JOIN films f ON f.tmdb_id = r.film_id"
-        " WHERE r.username = ?", (username,)).fetchall()
+        " WHERE r.username = %s", (username,)).fetchall()
     return rows
 
 def _rating_distribution(rows):
@@ -29,12 +29,12 @@ def _person_top_films(conn, username, id_col, id_value, cast_join=False):
         sql = ("SELECT f.title, f.year, f.poster_path, r.your_rating AS rating"
                " FROM film_cast t JOIN films f ON f.tmdb_id = t.film_id"
                " JOIN ratings r ON r.film_id = t.film_id"
-               " WHERE r.username = ? AND t.person_id = ?"
+               " WHERE r.username = %s AND t.person_id = %s"
                " ORDER BY r.your_rating DESC LIMIT 3")
     else:
         sql = ("SELECT f.title, f.year, f.poster_path, r.your_rating AS rating"
                " FROM films f JOIN ratings r ON r.film_id = f.tmdb_id"
-               " WHERE r.username = ? AND f.director_id = ?"
+               " WHERE r.username = %s AND f.director_id = %s"
                " ORDER BY r.your_rating DESC LIMIT 3")
     return [{"title": x["title"], "year": x["year"], "poster_path": x["poster_path"],
              "rating": x["rating"]} for x in conn.execute(sql, (username, id_value)).fetchall()]
@@ -45,8 +45,9 @@ def _top_people(conn, username, role_table, role_col, person_col):
         f" FROM {role_table} t"
         f" JOIN ratings r ON r.film_id = t.film_id"
         f" JOIN people p ON p.person_id = t.{person_col}"
-        f" WHERE r.username = ? AND t.{person_col} IS NOT NULL"
-        f" GROUP BY t.{person_col} ORDER BY c DESC LIMIT 6", (username,)).fetchall()
+        f" WHERE r.username = %s AND t.{person_col} IS NOT NULL"
+        f" GROUP BY t.{person_col}, p.name, p.profile_path"
+        f" ORDER BY c DESC LIMIT 6", (username,)).fetchall()
     return [{"name": r["name"], "profile_path": r["profile_path"], "count": r["c"],
              "top_films": _person_top_films(conn, username, person_col, r["pid"], cast_join=True)}
             for r in rows]
@@ -57,8 +58,9 @@ def _top_directors(conn, username):
         " FROM films f"
         " JOIN ratings r ON r.film_id = f.tmdb_id"
         " JOIN people p ON p.person_id = f.director_id"
-        " WHERE r.username = ? AND f.director_id IS NOT NULL"
-        " GROUP BY f.director_id ORDER BY c DESC LIMIT 6", (username,)).fetchall()
+        " WHERE r.username = %s AND f.director_id IS NOT NULL"
+        " GROUP BY f.director_id, p.name, p.profile_path"
+        " ORDER BY c DESC LIMIT 6", (username,)).fetchall()
     return [{"name": r["name"], "profile_path": r["profile_path"], "count": r["c"],
              "top_films": _person_top_films(conn, username, "director_id", r["pid"], cast_join=False)}
             for r in rows]
@@ -87,13 +89,13 @@ def build_dashboard(conn, username: str) -> dict:
     rated_meta = []
     for r in rated_rows:
         genres = [g["genre"] for g in conn.execute(
-            "SELECT genre FROM film_genres WHERE film_id = ?", (r["tmdb_id"],)).fetchall()]
+            "SELECT genre FROM film_genres WHERE film_id = %s", (r["tmdb_id"],)).fetchall()]
         keywords = [k["keyword"] for k in conn.execute(
-            "SELECT keyword FROM film_keywords WHERE film_id = ?", (r["tmdb_id"],)).fetchall()]
+            "SELECT keyword FROM film_keywords WHERE film_id = %s", (r["tmdb_id"],)).fetchall()]
         cast = [c["actor"] for c in conn.execute(
-            "SELECT actor FROM film_cast WHERE film_id = ?", (r["tmdb_id"],)).fetchall()]
+            "SELECT actor FROM film_cast WHERE film_id = %s", (r["tmdb_id"],)).fetchall()]
         director_row = conn.execute(
-            "SELECT director FROM films WHERE tmdb_id = ?", (r["tmdb_id"],)).fetchone()
+            "SELECT director FROM films WHERE tmdb_id = %s", (r["tmdb_id"],)).fetchone()
         rated_meta.append({
             "rating": r["your_rating"], "genres": genres, "keywords": keywords,
             "cast": cast, "director": director_row["director"] if director_row else None,

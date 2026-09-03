@@ -8,7 +8,7 @@ load_dotenv()
 class Config:
     username: str
     tmdb_api_key: str
-    db_path: str
+    database_url: str
     omdb_api_key: str = ""
     cors_origins: list[str] = field(default_factory=lambda: ["http://localhost:5173"])
     # Preview deployments get a fresh hostname every push, so an exact-origin
@@ -26,6 +26,11 @@ class MissingConfig(RuntimeError):
 
 def load_config() -> Config:
     origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173")
+    if not os.environ.get("DATABASE_URL"):
+        raise MissingConfig(
+            "DATABASE_URL is not set. Locally: start Postgres and use e.g. "
+            "postgresql://localhost/letterboxd. On a host: paste the connection "
+            "string your Postgres provider gives you (Neon's pooled one).")
     if not os.environ.get("TMDB_API_KEY"):
         raise MissingConfig(
             "TMDB_API_KEY is not set. Locally: copy backend/.env.example to "
@@ -37,7 +42,7 @@ def load_config() -> Config:
         refreshes_per_hour=int(os.environ.get("RATE_LIMIT_REFRESHES_PER_HOUR", "10")),
         username=os.environ.get("LETTERBOXD_USERNAME", ""),
         tmdb_api_key=os.environ["TMDB_API_KEY"],
-        db_path=os.environ.get("DB_PATH", "letterboxd.db"),
+        database_url=os.environ["DATABASE_URL"],
         omdb_api_key=os.environ.get("OMDB_API_KEY", ""),
         cors_origins=[o.strip() for o in origins.split(",")],
         cors_origin_regex=os.environ.get("CORS_ORIGIN_REGEX") or None,

@@ -135,7 +135,7 @@ def create_app(
         if conn_factory:
             return conn_factory()
         cfg = load_config()
-        conn = connect(cfg.db_path)
+        conn = connect(cfg.database_url)
         init_schema(conn)
         return conn
 
@@ -148,11 +148,11 @@ def create_app(
             " f.imdb_rating, f.rt_score, f.tmdb_vote_avg,"
             " r.match_pct, r.predicted_rating, r.why"
             " FROM recommendations r JOIN films f ON f.tmdb_id = r.film_id"
-            " WHERE r.username = ?"
+            " WHERE r.username = %s"
             " ORDER BY r.match_pct DESC", (username,)).fetchall()
         def starring(fid):
             return [c["actor"] for c in conn.execute(
-                "SELECT actor FROM film_cast WHERE film_id = ? LIMIT 3", (fid,)).fetchall()]
+                "SELECT actor FROM film_cast WHERE film_id = %s LIMIT 3", (fid,)).fetchall()]
         return [{
             "tmdb_id": r["tmdb_id"], "title": r["title"], "year": r["year"],
             "poster_path": r["poster_path"], "backdrop_path": r["backdrop_path"],
@@ -223,7 +223,7 @@ def create_app(
         conn = get_conn()
         authorize(conn, username, access_code)
         row = conn.execute(
-            "SELECT MAX(computed_at) AS ts FROM recommendations WHERE username = ?",
+            "SELECT MAX(computed_at) AS ts FROM recommendations WHERE username = %s",
             (username,)).fetchone()
         return {"last_updated": row["ts"]}
 
@@ -297,13 +297,13 @@ def create_app(
         row = conn.execute(
             "SELECT tmdb_id, title, year, runtime, director, overview,"
             " poster_path, backdrop_path, tmdb_vote_avg, imdb_rating, rt_score"
-            " FROM films WHERE tmdb_id = ?", (tmdb_id,)).fetchone()
+            " FROM films WHERE tmdb_id = %s", (tmdb_id,)).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="Film not found")
         genres = [r["genre"] for r in conn.execute(
-            "SELECT genre FROM film_genres WHERE film_id = ?", (tmdb_id,)).fetchall()]
+            "SELECT genre FROM film_genres WHERE film_id = %s", (tmdb_id,)).fetchall()]
         cast = [r["actor"] for r in conn.execute(
-            "SELECT actor FROM film_cast WHERE film_id = ?", (tmdb_id,)).fetchall()]
+            "SELECT actor FROM film_cast WHERE film_id = %s", (tmdb_id,)).fetchall()]
         return {
             "tmdb_id": row["tmdb_id"], "title": row["title"], "year": row["year"],
             "runtime": row["runtime"], "director": row["director"], "overview": row["overview"],

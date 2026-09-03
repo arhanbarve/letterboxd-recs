@@ -58,7 +58,9 @@ def _persist_person(conn, person):
     if person is None:
         return
     conn.execute(
-        "INSERT OR REPLACE INTO people (person_id, name, profile_path) VALUES (?,?,?)",
+        "INSERT INTO people (person_id, name, profile_path) VALUES (%s,%s,%s)"
+        " ON CONFLICT (person_id) DO UPDATE SET"
+        " name = EXCLUDED.name, profile_path = EXCLUDED.profile_path",
         (person["person_id"], person["name"], person["profile_path"]))
 
 def _persist_film(conn, m):
@@ -67,22 +69,29 @@ def _persist_film(conn, m):
         _persist_person(conn, p)
 
     conn.execute(
-        "INSERT OR REPLACE INTO films"
+        "INSERT INTO films"
         " (tmdb_id,title,year,decade,director,director_id,poster_path,backdrop_path,overview,runtime,tmdb_vote_avg,vote_count)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+        " ON CONFLICT (tmdb_id) DO UPDATE SET"
+        " title = EXCLUDED.title, year = EXCLUDED.year, decade = EXCLUDED.decade,"
+        " director = EXCLUDED.director, director_id = EXCLUDED.director_id,"
+        " poster_path = EXCLUDED.poster_path, backdrop_path = EXCLUDED.backdrop_path,"
+        " overview = EXCLUDED.overview, runtime = EXCLUDED.runtime,"
+        " tmdb_vote_avg = EXCLUDED.tmdb_vote_avg, vote_count = EXCLUDED.vote_count",
         (m["tmdb_id"], m["title"], m["year"], m["decade"], m["director"], m.get("director_id"),
          m["poster_path"], m.get("backdrop_path"), m.get("overview"), m.get("runtime"), m["vote_avg"],
          m.get("vote_count")))
-    conn.execute("DELETE FROM film_genres WHERE film_id=?", (m["tmdb_id"],))
-    conn.execute("DELETE FROM film_keywords WHERE film_id=?", (m["tmdb_id"],))
-    conn.execute("DELETE FROM film_cast WHERE film_id=?", (m["tmdb_id"],))
-    conn.executemany("INSERT INTO film_genres VALUES (?,?)",
-                     [(m["tmdb_id"], g) for g in m["genres"]])
-    conn.executemany("INSERT INTO film_keywords VALUES (?,?)",
-                     [(m["tmdb_id"], k) for k in m["keywords"]])
+    conn.execute("DELETE FROM film_genres WHERE film_id=%s", (m["tmdb_id"],))
+    conn.execute("DELETE FROM film_keywords WHERE film_id=%s", (m["tmdb_id"],))
+    conn.execute("DELETE FROM film_cast WHERE film_id=%s", (m["tmdb_id"],))
     cast_people_by_name = {p["name"]: p["person_id"] for p in m.get("cast_people", [])}
-    conn.executemany("INSERT INTO film_cast VALUES (?,?,?)",
-                     [(m["tmdb_id"], a, cast_people_by_name.get(a)) for a in m["cast"]])
+    with conn.cursor() as cur:
+        cur.executemany("INSERT INTO film_genres VALUES (%s,%s)",
+                        [(m["tmdb_id"], g) for g in m["genres"]])
+        cur.executemany("INSERT INTO film_keywords VALUES (%s,%s)",
+                        [(m["tmdb_id"], k) for k in m["keywords"]])
+        cur.executemany("INSERT INTO film_cast VALUES (%s,%s,%s)",
+                        [(m["tmdb_id"], a, cast_people_by_name.get(a)) for a in m["cast"]])
 
 def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> None:
     on_progress = on_progress or _noop
@@ -115,10 +124,13 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> N
     skipped = total - len(matched)
     rated = [f for f in matched if f.get("rating") is not None]
 
-    conn.execute("DELETE FROM ratings WHERE username=?", (cfg.username,))
-    conn.execute("DELETE FROM watched WHERE username=?", (cfg.username,))
-    conn.executemany("INSERT OR REPLACE INTO watched (username,film_id) VALUES (?,?)",
-                     [(cfg.username, f["tmdb_id"]) for f in matched])
+    conn.execute("DELETE FROM ratings WHERE username=%s", (cfg.username,))
+    conn.execute("DELETE FROM watched WHERE username=%s", (cfg.username,))
+    with conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO watched (username,film_id) VALUES (%s,%s)"
+            " ON CONFLICT (username, film_id) DO NOTHING",
+            [(cfg.username, f["tmdb_id"]) for f in matched])
 
     # Only rated films are enriched: an unrated-but-watched film contributes
     # nothing except its id to the exclusion set, and nothing joins watched to
@@ -132,7 +144,9 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> N
         m = deps.enrich_fn(f["tmdb_id"], cfg.tmdb_api_key)
         _persist_film(conn, m)
         conn.execute(
-            "INSERT OR REPLACE INTO ratings (username,film_id,your_rating) VALUES (?,?,?)",
+            "INSERT INTO ratings (username,film_id,your_rating) VALUES (%s,%s,%s)"
+            " ON CONFLICT (username, film_id) DO UPDATE SET"
+            " your_rating = EXCLUDED.your_rating",
             (cfg.username, f["tmdb_id"], f["rating"]))
         rm = dict(m); rm["rating"] = f["rating"]; rm["rated_date"] = f.get("rated_date")
         rated_meta.append(rm)
@@ -175,15 +189,15 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> N
                 continue
             ratings = deps.omdb_fn(imdb_id)
             conn.execute(
-                "UPDATE films SET imdb_rating=?, rt_score=? WHERE tmdb_id=?",
+                "UPDATE films SET imdb_rating=%s, rt_score=%s WHERE tmdb_id=%s",
                 (ratings.get("imdb_rating"), ratings.get("rt_score"), r["tmdb_id"]))
 
     now = datetime.now(timezone.utc).isoformat()
-    conn.execute("DELETE FROM recommendations WHERE username=?", (cfg.username,))
+    conn.execute("DELETE FROM recommendations WHERE username=%s", (cfg.username,))
     for r in results:
         conn.execute(
             "INSERT INTO recommendations (username,film_id,match_pct,predicted_rating,why,computed_at)"
-            " VALUES (?,?,?,?,?,?)",
+            " VALUES (%s,%s,%s,%s,%s,%s)",
             (cfg.username, r["tmdb_id"], r["match_pct"], r["predicted_rating"],
              json.dumps(r["why"]), now))
     conn.commit()

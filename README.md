@@ -26,11 +26,14 @@ Only the SHA-256 of a code is stored, so the database never holds a working code
 
 ## Local setup
 
-**Backend:**
+**Backend:** needs Postgres running locally.
 ```bash
+brew services start postgresql@16     # or any Postgres you already run
+createdb letterboxd_dev
+
 cd backend
 python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env   # fill in TMDB_API_KEY
+cp .env.example .env   # fill in TMDB_API_KEY; DATABASE_URL is preset for the db above
 ```
 Get a free TMDB v3 API key at https://www.themoviedb.org/settings/api (create an account, then Settings → API → request a key).
 
@@ -48,10 +51,15 @@ cd frontend && npm install
 ## Test
 
 ```bash
-cd backend && .venv/bin/python -m pytest -v     # unit + API
+cd backend && .venv/bin/python -m pytest -v     # unit + API (needs Postgres running)
 cd frontend && npm test                          # unit
 cd frontend && npx playwright test               # E2E (needs the backend running)
 ```
+
+The Python tests run against a real throwaway Postgres database (`letterboxd_test`),
+created and dropped by `tests/conftest.py` and emptied between tests. There is no
+in-memory stand-in, because one would not prove the actual SQL works. Point the
+suite at a different server with `TEST_ADMIN_DSN` / `TEST_DATABASE_URL`.
 
 The E2E import tests use synthetic export fixtures and claim a fresh username on
 each run. Regenerate the fixtures with
@@ -69,44 +77,48 @@ backend with `RATE_LIMIT_IMPORTS_PER_HOUR=1000` while iterating.
 
 ## Deploying so friends can use it
 
-Two pieces: backend on **Fly.io**, frontend on **Vercel**.
+Three pieces, all on free tiers that need no credit card: **Neon** for Postgres,
+**Render** for the API, **Vercel** for the frontend.
 
-The backend is a single uvicorn process reading a SQLite file, so it needs a host
-that offers a **persistent volume** — without one, every redeploy wipes the
-imports and everyone has to upload their zip again. That requirement is what
-rules out most free tiers.
+The data lives in Postgres rather than on a disk, which is what makes a free
+deployment possible at all — hosts give away compute far more readily than they
+give away persistent storage.
 
-### Backend (Fly.io)
+### Database (Neon)
 
-`backend/fly.toml` and `backend/Dockerfile` are committed, so this is mostly
-already done. From `backend/`:
+1. Create a project at [neon.tech](https://neon.tech). No card required.
+2. Copy the **pooled** connection string (the one with `-pooler` in the host).
+   Render's free instances sleep and reconnect constantly, which is what the
+   pooled endpoint exists for.
 
-```bash
-flyctl auth login
-flyctl launch --no-deploy          # reuses the committed fly.toml; pick your own app name
-flyctl volumes create letterboxd_data --size 1 --region iad
-flyctl secrets set TMDB_API_KEY=... OMDB_API_KEY=...
-flyctl deploy
-```
+The app creates its own tables on first start, so there is no migration step.
 
-`fly.toml` already sets `DB_PATH=/data/letterboxd.db` to match the volume mount,
-plus `CORS_ORIGINS` and an anchored `CORS_ORIGIN_REGEX`. Edit those to your own
-Vercel URL. **Anchor the regex** with `^` and `$` — an unanchored
-`.*\.vercel\.app` lets any site hosted on Vercel call your API.
+### Backend (Render)
 
-Only the API keys go through `flyctl secrets`; `fly.toml` is committed, so
-nothing secret belongs in it.
+`render.yaml` is committed, so this is a blueprint deploy:
 
-The machine suspends when idle and wakes on the next request, which is what
-keeps it inside the free allowance — expect a second or two on the first request
-after a nap. Because SQLite lives on a volume, exactly one machine may run; do
-not scale it out.
+1. At [render.com](https://render.com), New → Blueprint, point it at this repo.
+2. It reads `render.yaml` — free plan, root `backend/`, uvicorn start command.
+3. Set the three secrets in the dashboard (they are marked `sync: false`, so they
+   are never read from the repo):
+   - `DATABASE_URL` — the Neon pooled string
+   - `TMDB_API_KEY`
+   - `OMDB_API_KEY` — optional, adds IMDb/Rotten Tomatoes scores
+4. Edit `CORS_ORIGINS` in `render.yaml` to your own Vercel URL, and the anchored
+   `CORS_ORIGIN_REGEX` alongside it. **Keep it anchored** with `^` and `$` — an
+   unanchored `.*\.vercel\.app` lets any site hosted on Vercel call your API.
+
+Free Render instances sleep after ~15 minutes idle, so the first request after a
+quiet spell takes a few seconds to wake. Nothing is lost when it sleeps, because
+no state lives on the instance.
 
 ### Frontend (Vercel)
 
 1. Create a Vercel account, import this repo, set the project root to `frontend/`.
-2. Vercel auto-detects Vite. Set the environment variable `VITE_API_BASE_URL` to your Fly backend URL (e.g. `https://your-app.fly.dev`).
-3. Deploy. Share the resulting Vercel URL with friends — each person uploads their own export, and everyone's data stays isolated on the shared backend.
+2. Vercel auto-detects Vite. Set `VITE_API_BASE_URL` to your Render backend URL
+   (e.g. `https://letterboxd-recs-api.onrender.com`).
+3. Deploy. Share the resulting Vercel URL — each person uploads their own export,
+   and everyone's data stays scoped to their own Letterboxd username.
 
 If the deployed app reports "Failed to fetch", it is almost always one of those two settings: `VITE_API_BASE_URL` missing on Vercel (the frontend then calls `127.0.0.1`), or the Vercel origin missing from `CORS_ORIGINS` on the backend.
 

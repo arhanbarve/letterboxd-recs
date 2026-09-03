@@ -5,11 +5,11 @@ from app.config import load_config
 def test_load_config_reads_env(monkeypatch):
     monkeypatch.setenv("LETTERBOXD_USERNAME", "alice")
     monkeypatch.setenv("TMDB_API_KEY", "key123")
-    monkeypatch.setenv("DB_PATH", "test.db")
+    monkeypatch.setenv("DATABASE_URL", "postgresql:///test")
     cfg = load_config()
     assert cfg.username == "alice"
     assert cfg.tmdb_api_key == "key123"
-    assert cfg.db_path == "test.db"
+    assert cfg.database_url == "postgresql:///test"
 
 def test_load_config_username_optional(monkeypatch):
     monkeypatch.delenv("LETTERBOXD_USERNAME", raising=False)

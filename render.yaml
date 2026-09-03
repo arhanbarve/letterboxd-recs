@@ -1,0 +1,32 @@
+# Render blueprint for the backend. The frontend stays on Vercel.
+#
+# DATABASE_URL is deliberately NOT set here: the database lives on Neon, whose
+# free tier needs no card and survives redeploys. Paste Neon's *pooled*
+# connection string into the Render dashboard as a secret env var — Render's
+# free instances sleep and reconnect often, which is exactly what a pooled
+# endpoint is for.
+services:
+  - type: web
+    name: letterboxd-recs-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/import/status?username=healthcheck
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: CORS_ORIGINS
+        value: https://arhan-lbxd-recs.vercel.app
+      # Vercel preview deployments get a new hostname per push. Anchored, so it
+      # cannot be widened into "any site hosted on Vercel".
+      - key: CORS_ORIGIN_REGEX
+        value: ^https://arhan-lbxd-recs(-[a-z0-9]+-[a-z0-9-]+)?\.vercel\.app$
+      # Set in the dashboard, never here — this file is committed.
+      - key: DATABASE_URL
+        sync: false
+      - key: TMDB_API_KEY
+        sync: false
+      - key: OMDB_API_KEY
+        sync: false

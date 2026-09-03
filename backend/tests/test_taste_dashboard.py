@@ -1,5 +1,6 @@
 from app.db import connect, init_schema
 from app.taste_dashboard import build_dashboard
+from tests.conftest import TEST_DSN
 
 def _seed_alice(conn):
     films = [
@@ -9,7 +10,7 @@ def _seed_alice(conn):
     ]
     for tmdb_id, title, year, decade, director, director_id in films:
         conn.execute(
-            "INSERT INTO films (tmdb_id,title,year,decade,director,director_id) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO films (tmdb_id,title,year,decade,director,director_id) VALUES (%s,%s,%s,%s,%s,%s)",
             (tmdb_id, title, year, decade, director, director_id))
     conn.execute("INSERT INTO people VALUES (21684,'Bong Joon-ho','/d.jpg')")
     conn.execute("INSERT INTO people VALUES (1523,'Song Kang-ho','/a.jpg')")
@@ -24,13 +25,13 @@ def _seed_alice(conn):
     conn.commit()
 
 def test_build_dashboard_totals_and_average(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed_alice(conn)
+    conn = connect(TEST_DSN); init_schema(conn); _seed_alice(conn)
     dash = build_dashboard(conn, "alice")
     assert dash["total_rated"] == 3
     assert round(dash["average_rating"], 2) == round((5.0 + 4.5 + 2.0) / 3, 2)
 
 def test_build_dashboard_favorite_decade(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed_alice(conn)
+    conn = connect(TEST_DSN); init_schema(conn); _seed_alice(conn)
     dash = build_dashboard(conn, "alice")
     assert dash["favorite_decade"] == 2010
 
@@ -43,14 +44,14 @@ def test_rating_distribution_uses_half_star_buckets():
     assert by[4.5] == 2 and by[3.0] == 1 and by[0.5] == 1
 
 def test_build_dashboard_rating_distribution_buckets_by_half_star(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed_alice(conn)
+    conn = connect(TEST_DSN); init_schema(conn); _seed_alice(conn)
     dash = build_dashboard(conn, "alice")
     dist = {b["star"]: b["count"] for b in dash["rating_distribution"]}
     assert dist[5.0] == 1 and dist[4.5] == 1  # 5.0 and 4.5 now land in separate half-star buckets
     assert dist[2.0] == 1
 
 def test_top_directors_include_top_films(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed_alice(conn)
+    conn = connect(TEST_DSN); init_schema(conn); _seed_alice(conn)
     dash = build_dashboard(conn, "alice")
     d0 = dash["top_directors"][0]
     assert "top_films" in d0 and len(d0["top_films"]) <= 3
@@ -58,32 +59,32 @@ def test_top_directors_include_top_films(tmp_path):
     assert {"title", "year", "rating", "poster_path"} <= set(d0["top_films"][0])
 
 def test_build_dashboard_top_director_has_headshot(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed_alice(conn)
+    conn = connect(TEST_DSN); init_schema(conn); _seed_alice(conn)
     dash = build_dashboard(conn, "alice")
     top = dash["top_directors"][0]
     assert top["name"] == "Bong Joon-ho"
     assert top["profile_path"] == "/d.jpg"
 
 def test_build_dashboard_top_actor_has_headshot(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed_alice(conn)
+    conn = connect(TEST_DSN); init_schema(conn); _seed_alice(conn)
     dash = build_dashboard(conn, "alice")
     top = dash["top_actors"][0]
     assert top["name"] == "Song Kang-ho"
     assert top["profile_path"] == "/a.jpg"
 
 def test_build_dashboard_genre_affinities_for_radar(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed_alice(conn)
+    conn = connect(TEST_DSN); init_schema(conn); _seed_alice(conn)
     dash = build_dashboard(conn, "alice")
     genres = {g["name"] for g in dash["genre_affinities"]}
     assert genres == {"Thriller", "Romance"}
 
 def test_build_dashboard_signature_is_a_nonempty_sentence(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed_alice(conn)
+    conn = connect(TEST_DSN); init_schema(conn); _seed_alice(conn)
     dash = build_dashboard(conn, "alice")
     assert isinstance(dash["signature"], str) and dash["signature"].endswith(".")
 
 def test_build_dashboard_empty_for_user_with_no_ratings(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     dash = build_dashboard(conn, "nobody")
     assert dash["total_rated"] == 0
     assert dash["top_directors"] == []

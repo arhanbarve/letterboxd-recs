@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from app.api import create_app
 from app.auth import hash_token, mint_token
 from app.db import connect, init_schema, load_imported_films, store_token_hash
+from tests.conftest import TEST_DSN
 
 CODE_HEADER = "X-Access-Code"
 
@@ -28,7 +29,7 @@ def _wait_until(cond, timeout=1.0, interval=0.01):
     raise AssertionError("condition not met in time")
 
 def _mem_conn():
-    conn = connect(":memory:")
+    conn = connect(TEST_DSN)
     init_schema(conn)
     return conn
 
@@ -39,13 +40,13 @@ def _seed(conn):
     conn.execute("INSERT INTO film_genres VALUES (99,'Thriller')")
     conn.execute("INSERT INTO film_cast VALUES (99,'Song Kang-ho',1523)")
     why = {"neighbors": [{"title": "Snowpiercer", "rating": 5.0}], "connection": "directed by Bong"}
-    conn.execute("INSERT INTO recommendations VALUES ('alice', 99, 92.0, 4.3, ?, 'now')",
+    conn.execute("INSERT INTO recommendations VALUES ('alice', 99, 92.0, 4.3, %s, 'now')",
                  (json.dumps(why),))
     conn.execute("INSERT INTO ratings (username,film_id,your_rating) VALUES ('alice',99,0)")  # unused row
     conn.commit()
 
 def test_get_recommendations_returns_cards(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed(conn)
+    conn = connect(TEST_DSN); init_schema(conn); _seed(conn)
     app = create_app(conn_factory=lambda: conn, refresh_fn=lambda conn, username=None, on_progress=None, cancel_event=None: None)
     client = TestClient(app)
     code = _claim(conn, "alice")
@@ -60,7 +61,7 @@ def test_get_recommendations_returns_cards(tmp_path):
     assert body[0]["backdrop_path"] == "/rb.jpg"
 
 def test_recommendations_include_starring_and_ratings(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     conn.execute(
         "INSERT INTO films (tmdb_id,title,year,poster_path,backdrop_path,overview,runtime,director,"
         "tmdb_vote_avg,imdb_rating,rt_score)"
@@ -82,7 +83,7 @@ def test_recommendations_include_starring_and_ratings(tmp_path):
     assert row["vote_avg"] == 7.9
 
 def test_get_recommendations_scoped_by_username(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed(conn)
+    conn = connect(TEST_DSN); init_schema(conn); _seed(conn)
     app = create_app(conn_factory=lambda: conn, refresh_fn=lambda conn, username=None, on_progress=None, cancel_event=None: None)
     client = TestClient(app)
     bob_code = _claim(conn, "bob")
@@ -91,7 +92,7 @@ def test_get_recommendations_scoped_by_username(tmp_path):
     assert resp.json() == []  # bob has no recommendations, alice's don't leak
 
 def test_get_film_detail_returns_full_metadata(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     conn.execute(
         "INSERT INTO films (tmdb_id,title,year,poster_path,backdrop_path,overview,runtime,director)"
         " VALUES (99,'Rec',2018,'/r.jpg','/rb.jpg','A pitch.',108,'Bong')")
@@ -115,14 +116,14 @@ def test_get_film_detail_returns_full_metadata(tmp_path):
     assert body["cast"] == ["Song Kang-ho"]
 
 def test_get_film_detail_404_for_unknown_film(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     app = create_app(conn_factory=lambda: conn, refresh_fn=lambda conn, username=None, on_progress=None, cancel_event=None: None)
     client = TestClient(app)
     resp = client.get("/api/films/999999")
     assert resp.status_code == 404
 
 def test_get_taste_profile_scoped_by_username(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     conn.execute("INSERT INTO films (tmdb_id,title,year,decade) VALUES (1,'X',2000,2000)")
     conn.execute("INSERT INTO film_genres VALUES (1,'Thriller')")
     conn.execute("INSERT INTO ratings (username,film_id,your_rating) VALUES ('alice',1,5.0)")
@@ -138,7 +139,7 @@ def test_get_taste_profile_scoped_by_username(tmp_path):
     assert resp_bob.json()["total_rated"] == 0
 
 def test_post_refresh_invokes_refresh_fn(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     called = {"n": 0}
     def fake_refresh(c, username=None, on_progress=None, cancel_event=None):
         called["n"] += 1
@@ -150,7 +151,7 @@ def test_post_refresh_invokes_refresh_fn(tmp_path):
     _wait_until(lambda: called["n"] == 1)
 
 def test_post_refresh_passes_username_override(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     seen = {}
     def fake_refresh(c, username=None, on_progress=None, cancel_event=None):
         seen["username"] = username
@@ -162,7 +163,7 @@ def test_post_refresh_passes_username_override(tmp_path):
     _wait_until(lambda: seen.get("username") == "alice")
 
 def test_post_refresh_without_a_username_is_rejected(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     seen = {}
     def fake_refresh(c, username=None, on_progress=None, cancel_event=None):
         seen["username"] = username
@@ -173,7 +174,7 @@ def test_post_refresh_without_a_username_is_rejected(tmp_path):
     assert seen == {}  # and no TMDB-spending work was started
 
 def test_refresh_status_reflects_progress_reported_during_refresh(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     def fake_refresh(c, username=None, on_progress=None, cancel_event=None):
         on_progress({"stage": "enriching", "current": 3, "total": 10, "message": "..."})
     app = create_app(conn_factory=lambda: conn, refresh_fn=fake_refresh)
@@ -193,7 +194,7 @@ def test_refresh_status_reflects_progress_reported_during_refresh(tmp_path):
     assert body["total"] == 10
 
 def test_post_refresh_rejects_concurrent_start_for_same_user(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     started = threading.Event()
     finish = threading.Event()
     def fake_refresh(c, username=None, on_progress=None, cancel_event=None):
@@ -209,7 +210,7 @@ def test_post_refresh_rejects_concurrent_start_for_same_user(tmp_path):
     finish.set()
 
 def test_refresh_status_defaults_to_idle(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     app = create_app(conn_factory=lambda: conn, refresh_fn=lambda c, username=None, on_progress=None, cancel_event=None: None)
     client = TestClient(app)
     code = _claim(conn, "alice")
@@ -218,7 +219,7 @@ def test_refresh_status_defaults_to_idle(tmp_path):
     assert resp.json()["stage"] in ("idle", "done")
 
 def test_get_watch_providers_returns_normalized_data(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     app = create_app(
         conn_factory=lambda: conn,
         watch_providers_fn=lambda tid: {"link": "https://x", "flatrate": [{"name": "Netflix", "logo_path": "/n.jpg"}], "rent": [], "buy": []},
@@ -231,7 +232,7 @@ def test_get_watch_providers_returns_normalized_data(tmp_path):
     assert body["link"] == "https://x"
 
 def test_post_refresh_cancel_sets_event_and_stage_becomes_cancelled(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     started = threading.Event()
     from app.errors import Cancelled
     def fake_refresh(c, username=None, on_progress=None, cancel_event=None):
@@ -258,7 +259,7 @@ def test_post_refresh_cancel_sets_event_and_stage_becomes_cancelled(tmp_path):
     assert body["stage"] == "cancelled"
 
 def test_cancel_event_cleared_when_new_run_starts(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     seen_cancel_states = []
     def fake_refresh(c, username=None, on_progress=None, cancel_event=None):
         seen_cancel_states.append(cancel_event.is_set())
@@ -362,7 +363,7 @@ def _real_refresh_env(monkeypatch, tmp_path, conn, search_results):
     from app.config import Config
 
     monkeypatch.setattr(api_mod, "load_config", lambda: Config(
-        username="sampleuser", tmdb_api_key="KEY", db_path=str(tmp_path / "x.db")))
+        username="sampleuser", tmdb_api_key="KEY", database_url="postgresql:///unused"))
     monkeypatch.setattr(api_mod, "search_movie",
                         lambda title, year, key: search_results.get(title))
 
@@ -470,7 +471,7 @@ def test_only_the_first_import_returns_a_code():
     assert "access_code" not in _upload(client, sample_zip(), code=code).json()
 
 def test_recommendations_reject_a_missing_or_wrong_code(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn); _seed(conn)
+    conn = connect(TEST_DSN); init_schema(conn); _seed(conn)
     _claim(conn, "alice")
     client = TestClient(create_app(conn_factory=lambda: conn, refresh_fn=_noop_refresh))
     assert client.get("/api/recommendations", params={"username": "alice"}).status_code == 403
@@ -478,7 +479,7 @@ def test_recommendations_reject_a_missing_or_wrong_code(tmp_path):
                       headers=_auth(mint_token())).status_code == 403
 
 def test_taste_profile_rejects_a_missing_code(tmp_path):
-    conn = connect(str(tmp_path / "t.db")); init_schema(conn)
+    conn = connect(TEST_DSN); init_schema(conn)
     conn.execute("INSERT INTO films (tmdb_id,title,year,decade) VALUES (1,'X',2000,2000)")
     conn.execute("INSERT INTO ratings (username,film_id,your_rating) VALUES ('alice',1,5.0)")
     conn.commit()
@@ -541,7 +542,7 @@ def test_refresh_error_message_never_leaks_the_tmdb_api_key():
         resp = requests.Response()
         resp.status_code = 401
         resp.reason = "Unauthorized"
-        resp.url = "https://api.themoviedb.org/3/movie/550?api_key=SUPERSECRETKEY123&x=1"
+        resp.url = "https://api.themoviedb.org/3/movie/550%sapi_key=SUPERSECRETKEY123&x=1"
         resp.raise_for_status()
 
     client = TestClient(create_app(conn_factory=lambda: conn, refresh_fn=exploding_refresh))

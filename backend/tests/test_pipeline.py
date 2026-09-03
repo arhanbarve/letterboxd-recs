@@ -5,9 +5,9 @@ from app.pipeline import run_refresh, Deps
 from app.config import Config
 
 def test_run_refresh_persists_recommendations(tmp_path):
-    conn = connect(str(tmp_path / "t.db"))
+    conn = connect(TEST_DSN)
     init_schema(conn)
-    cfg = Config(username="alice", tmdb_api_key="k", db_path="t.db")
+    cfg = Config(username="alice", tmdb_api_key="k", database_url="postgresql:///unused")
 
     scraped = [
         {"slug": "parasite", "title": "Parasite", "rating": 5.0, "tmdb_id": 1},
@@ -46,9 +46,9 @@ def test_run_refresh_persists_recommendations(tmp_path):
     assert 2 not in ids         # already watched, excluded
 
 def test_run_refresh_stores_omdb_ratings_for_top_results(tmp_path):
-    conn = connect(str(tmp_path / "t.db"))
+    conn = connect(TEST_DSN)
     init_schema(conn)
-    cfg = Config(username="alice", tmdb_api_key="k", db_path="t.db")
+    cfg = Config(username="alice", tmdb_api_key="k", database_url="postgresql:///unused")
 
     scraped = [{"slug": "parasite", "title": "Parasite", "rating": 5.0, "tmdb_id": 1}]
     meta = {
@@ -79,9 +79,9 @@ def test_run_refresh_stores_omdb_ratings_for_top_results(tmp_path):
     assert row["imdb_rating"] == 8.0 and row["rt_score"] == 90
 
 def test_run_refresh_reports_progress_through_stages(tmp_path):
-    conn = connect(str(tmp_path / "t.db"))
+    conn = connect(TEST_DSN)
     init_schema(conn)
-    cfg = Config(username="alice", tmdb_api_key="k", db_path="t.db")
+    cfg = Config(username="alice", tmdb_api_key="k", database_url="postgresql:///unused")
 
     scraped = [{"slug": "parasite", "title": "Parasite", "rating": 5.0, "tmdb_id": 1}]
     meta = {
@@ -106,9 +106,9 @@ def test_run_refresh_reports_progress_through_stages(tmp_path):
     assert seen_stages[-1] == "done"
 
 def test_run_refresh_includes_person_candidates_when_deps_provided(tmp_path):
-    conn = connect(str(tmp_path / "t.db"))
+    conn = connect(TEST_DSN)
     init_schema(conn)
-    cfg = Config(username="alice", tmdb_api_key="k", db_path="t.db")
+    cfg = Config(username="alice", tmdb_api_key="k", database_url="postgresql:///unused")
 
     scraped = [{"slug": "goodfellas", "title": "Goodfellas", "rating": 5.0, "tmdb_id": 1}]
     meta = {
@@ -139,7 +139,7 @@ def test_run_refresh_includes_person_candidates_when_deps_provided(tmp_path):
     assert 769 in ids  # surfaced only via the director-based supplemental pool
 
 def test_run_refresh_is_isolated_per_username(tmp_path):
-    conn = connect(str(tmp_path / "t.db"))
+    conn = connect(TEST_DSN)
     init_schema(conn)
 
     meta = {
@@ -167,7 +167,7 @@ def test_run_refresh_is_isolated_per_username(tmp_path):
               "cast_people": [], "backdrop_path": "/rb_bd.jpg", "overview": "A recommended film B.", "runtime": 108},
     }
 
-    alice_cfg = Config(username="alice", tmdb_api_key="k", db_path="t.db")
+    alice_cfg = Config(username="alice", tmdb_api_key="k", database_url="postgresql:///unused")
     alice_deps = Deps(
         load_films_fn=lambda user: [
             {"slug": "parasite", "title": "Parasite", "rating": 5.0, "tmdb_id": 1}],
@@ -176,7 +176,7 @@ def test_run_refresh_is_isolated_per_username(tmp_path):
     )
     run_refresh(conn, alice_cfg, alice_deps)
 
-    bob_cfg = Config(username="bob", tmdb_api_key="k", db_path="t.db")
+    bob_cfg = Config(username="bob", tmdb_api_key="k", database_url="postgresql:///unused")
     bob_deps = Deps(
         load_films_fn=lambda user: [
             {"slug": "oldboy", "title": "Oldboy", "rating": 5.0, "tmdb_id": 2}],
@@ -208,10 +208,10 @@ def _meta(tmdb_id, title="Film", year=2019, rating_hint=None):
             "backdrop_path": None, "overview": "", "runtime": 100}
 
 def _cfg():
-    return Config(username="alice", tmdb_api_key="k", db_path="t.db")
+    return Config(username="alice", tmdb_api_key="k", database_url="postgresql:///unused")
 
 def _conn():
-    conn = connect(":memory:")
+    conn = connect(TEST_DSN)
     init_schema(conn)
     return conn
 
@@ -336,11 +336,12 @@ def test_run_refresh_caps_the_candidate_pool():
 
 import threading
 from app.errors import Cancelled
+from tests.conftest import TEST_DSN
 
 def test_run_refresh_raises_cancelled_when_event_set_before_enrich_loop(tmp_path):
-    conn = connect(str(tmp_path / "t.db"))
+    conn = connect(TEST_DSN)
     init_schema(conn)
-    cfg = Config(username="alice", tmdb_api_key="k", db_path="t.db")
+    cfg = Config(username="alice", tmdb_api_key="k", database_url="postgresql:///unused")
 
     scraped = [{"slug": "parasite", "title": "Parasite", "rating": 5.0, "tmdb_id": 1}]
     cancel_event = threading.Event()
@@ -354,9 +355,9 @@ def test_run_refresh_raises_cancelled_when_event_set_before_enrich_loop(tmp_path
         run_refresh(conn, cfg, deps, cancel_event=cancel_event)
 
 def test_run_refresh_raises_cancelled_mid_scoring_loop(tmp_path):
-    conn = connect(str(tmp_path / "t.db"))
+    conn = connect(TEST_DSN)
     init_schema(conn)
-    cfg = Config(username="alice", tmdb_api_key="k", db_path="t.db")
+    cfg = Config(username="alice", tmdb_api_key="k", database_url="postgresql:///unused")
 
     scraped = [{"slug": "parasite", "title": "Parasite", "rating": 5.0, "tmdb_id": 1}]
     meta = {
