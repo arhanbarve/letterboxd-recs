@@ -9,7 +9,7 @@ RATINGS_HEADER = "Date,Name,Year,Letterboxd URI,Rating\n"
 WATCHED_HEADER = "Date,Name,Year,Letterboxd URI\n"
 PROFILE = ("Date Joined,Username,Given Name,Family Name,Email Address,Location,"
            "Website,Bio,Pronoun,Favorite Films\n"
-           "2026-02-05,moviefan,Arhan,B,a@example.com,,,,they/them,\n")
+           "2026-02-05,sampleuser,Sample,User,,,,,they/them,\n")
 
 def make_zip(**members) -> bytes:
     buf = io.BytesIO()
@@ -30,7 +30,7 @@ def sample_zip(ratings_rows="2026-02-05,Parasite,2019,https://boxd.it/293w,5\n",
 
 def test_parses_username_and_films():
     result = parse_export(sample_zip())
-    assert result["username"] == "moviefan"
+    assert result["username"] == "sampleuser"
     assert result["films"] == [{
         "boxd_id": "293w", "title": "Parasite", "year": 2019,
         "rating": 5.0, "rated_date": "2026-02-05",
@@ -133,3 +133,22 @@ def test_rejects_oversized_upload():
 def test_rejects_empty_upload():
     with pytest.raises(ExportParseError):
         parse_export(b"")
+
+def test_rejects_a_zip_bomb_before_decompressing_it():
+    """The compressed cap alone does not bound memory: highly repetitive CSV
+    compresses hundreds of times over, and the rows are read into a list."""
+    from app.importer import MAX_UNCOMPRESSED_BYTES
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("ratings.csv", RATINGS_HEADER)
+        z.writestr("watched.csv", "x" * (MAX_UNCOMPRESSED_BYTES + 1))
+    data = buf.getvalue()
+    assert len(data) < MAX_UPLOAD_BYTES  # it sails past the compressed-size check
+    with pytest.raises(ExportParseError, match="far larger"):
+        parse_export(data)
+
+def test_rejects_a_csv_with_an_absurd_number_of_rows():
+    from app.importer import MAX_ROWS_PER_FILE
+    rows = "2026-02-05,F,2019,https://boxd.it/a,5\n" * (MAX_ROWS_PER_FILE + 1)
+    with pytest.raises(ExportParseError, match="rows"):
+        parse_export(make_zip(**{"ratings.csv": RATINGS_HEADER + rows}))

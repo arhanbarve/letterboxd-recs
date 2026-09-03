@@ -4,14 +4,24 @@
 // the Vite dev server (Playwright starts `npm run dev` via playwright.config.js).
 // Reuse the local DB the developer has already refreshed. To seed:
 //   cd backend && python -m app.pipeline --username <USER>   # or refresh via the UI
-// Run with:  E2E_USERNAME=<USER> npm run e2e
+//
+// Reads are gated on that username's access code — the one the app showed when
+// its export was first imported — so both env vars are required:
+//   E2E_USERNAME=<USER> E2E_ACCESS_CODE=<CODE> npm run e2e
 import { test, expect } from "@playwright/test";
 
-const USER = process.env.E2E_USERNAME || "moviefan";
+const USER = process.env.E2E_USERNAME;
+const CODE = process.env.E2E_ACCESS_CODE;
+
+test.skip(!USER || !CODE,
+  "set E2E_USERNAME and E2E_ACCESS_CODE to a locally-seeded account");
 
 test.beforeEach(async ({ page }) => {
   // useLocalStorage stores plain strings (no JSON) — must match that format.
-  await page.addInitScript((u) => localStorage.setItem("letterboxd_username", u), USER);
+  await page.addInitScript(([u, c]) => {
+    localStorage.setItem("letterboxd_username", u);
+    localStorage.setItem(`reel_access_code:${u}`, c);
+  }, [USER, CODE]);
 });
 
 test("header + one-line control bar render", async ({ page }) => {

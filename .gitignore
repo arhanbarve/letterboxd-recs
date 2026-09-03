@@ -1,12 +1,31 @@
 __pycache__/
 *.pyc
-.env
-*.db
-*.db-journal
 .venv/
+venv/
 node_modules/
 dist/
 .superpowers/
 .claude/
 .playwright-mcp/
 test-results/
+.DS_Store
+
+# Secrets. .env.example is the only one that belongs in the repo.
+.env
+.env.*
+!.env.example
+
+# The SQLite file holds every user's imported ratings.
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# A real Letterboxd export contains the account's email address in profile.csv.
+# Only the synthetic E2E fixtures may be committed.
+letterboxd-*.zip
+!frontend/tests/e2e/fixtures/letterboxd-export-sample*.zip
+
+# Screenshots taken while testing show real recommendations and usernames.
+*.png
+!frontend/src/assets/*.png

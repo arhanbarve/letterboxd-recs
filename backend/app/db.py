@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS film_slug_tmdb (
     tmdb_id INTEGER,
     resolved_via TEXT
 );
+CREATE TABLE IF NOT EXISTS user_tokens (
+    username TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL,
+    created_at TEXT
+);
 CREATE TABLE IF NOT EXISTS imported_films (
     username TEXT, boxd_id TEXT, title TEXT, year INTEGER,
     rating REAL,       -- NULL = watched but unrated
@@ -79,6 +84,19 @@ def store_slug_tmdb(conn: sqlite3.Connection, slug: str, tmdb_id: int | None, vi
         "INSERT OR REPLACE INTO film_slug_tmdb (slug, tmdb_id, resolved_via) VALUES (?,?,?)",
         (slug, tmdb_id, via))
     conn.commit()  # cache must survive a later run failure
+
+def get_token_hash(conn: sqlite3.Connection, username: str) -> str | None:
+    """None means the username is unclaimed — nobody has imported under it yet."""
+    row = conn.execute(
+        "SELECT token_hash FROM user_tokens WHERE username=?", (username,)).fetchone()
+    return row["token_hash"] if row else None
+
+def store_token_hash(conn: sqlite3.Connection, username: str, token_hash: str) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO user_tokens (username, token_hash, created_at)"
+        " VALUES (?,?,?)",
+        (username, token_hash, datetime.now(timezone.utc).isoformat()))
+    conn.commit()
 
 def replace_imported_films(conn: sqlite3.Connection, username: str, films: list[dict],
                            imported_at: str | None = None) -> None:

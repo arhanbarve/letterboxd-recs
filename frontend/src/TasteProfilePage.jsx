@@ -66,7 +66,9 @@ export default function TasteProfilePage({ username }) {
 
   const load = () => {
     if (!username) return;
-    getTasteProfile(username).then(setDash);
+    // A 403 (no access code for this username) renders the same as no data —
+    // the Recommendations tab is where the code is asked for.
+    getTasteProfile(username).then(setDash).catch(() => setDash(null));
     getLastUpdated(username).then((r) => setUpdatedAt(r.last_updated)).catch(() => {});
   };
 

@@ -1392,7 +1392,7 @@ export default defineConfig({
 ```js
 import { test, expect } from "@playwright/test";
 
-const USER = process.env.E2E_USERNAME || "arhanbarve";
+const USER = process.env.E2E_USERNAME || "moviefan";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((u) => localStorage.setItem("letterboxd_username", JSON.stringify(u)), USER);

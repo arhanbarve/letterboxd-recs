@@ -33,6 +33,7 @@ function ControlBar({ username, setUsername, hasImport, onImported }) {
 export default function App() {
   const [username, setUsername] = useLocalStorage("letterboxd_username", "");
   const [importStatus, setImportStatus] = useState(null);
+  const [issuedCode, setIssuedCode] = useState(null);
 
   useEffect(() => {
     if (!username) {
@@ -46,15 +47,21 @@ export default function App() {
     return () => { stale = true; };
   }, [username]);
 
+  // Switching usernames must not keep showing the previous one's code.
+  useEffect(() => { setIssuedCode(null); }, [username]);
+
   // profile.csv is authoritative about whose export this is, so importing both
   // stores the data and corrects a mistyped username.
   const onImported = useCallback((result) => {
-    const { username: owner, ...status } = result;
+    const { username: owner, access_code: code, ...status } = result;
     if (owner && owner !== username) setUsername(owner);
+    if (code) setIssuedCode(code);
     setImportStatus(status);
   }, [username, setUsername]);
 
   const hasImport = (importStatus?.imported ?? 0) > 0;
+  // Claimed by someone, but this browser holds no working code for it.
+  const needsCode = !hasImport && importStatus?.claimed === true;
 
   return (
     <div className="app">
@@ -77,6 +84,9 @@ export default function App() {
                 username={username}
                 importStatus={importStatus}
                 onImported={onImported}
+                issuedCode={issuedCode}
+                needsCode={needsCode}
+                onUnlocked={setImportStatus}
               />
             } />
             <Route path="/taste" element={<TasteProfilePage username={username} />} />

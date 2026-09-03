@@ -8,6 +8,7 @@ import MarqueeTrio from "./components/MarqueeTrio";
 import ExpandedFilmCard from "./components/ExpandedFilmCard";
 import LastUpdated from "./components/LastUpdated";
 import ImportPanel from "./components/ImportPanel";
+import AccessCodePanel from "./components/AccessCodePanel";
 
 const LONG_SHOT_PAGE = 50;
 
@@ -25,7 +26,9 @@ function SkeletonGrid({ count = 6 }) {
   );
 }
 
-export default function RecommendationsPage({ username, importStatus, onImported }) {
+export default function RecommendationsPage({
+  username, importStatus, onImported, issuedCode, needsCode, onUnlocked,
+}) {
   const [recs, setRecs] = useState(null);
   const [error, setError] = useState(null);
   const [selectedFilm, setSelectedFilm] = useState(null);
@@ -34,11 +37,15 @@ export default function RecommendationsPage({ username, importStatus, onImported
   const hasImport = (importStatus?.imported ?? 0) > 0;
 
   const load = async () => {
-    if (!username) return;
+    // These endpoints need the access code, and without an import there is
+    // nothing to fetch anyway — asking would only produce a 403 to swallow.
+    if (!username || !hasImport) return;
     try {
       setRecs(await getRecommendations(username));
-    } catch {
-      setError("Couldn't load recommendations. Is the backend running?");
+    } catch (e) {
+      setError(e.status === 403
+        ? "That access code doesn't unlock this username's recommendations."
+        : "Couldn't load recommendations. Is the backend running?");
     }
     try {
       setUpdatedAt((await getLastUpdated(username)).last_updated);
@@ -50,8 +57,10 @@ export default function RecommendationsPage({ username, importStatus, onImported
   useEffect(() => {
     setRecs(null);
     setUpdatedAt(null);
+    setError(null);
     load();
-  }, [username]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [username, hasImport]);
 
   const lastCompletedAtRef = useRef(lastCompletedAt);
   useEffect(() => {
@@ -85,7 +94,15 @@ export default function RecommendationsPage({ username, importStatus, onImported
         </div>
       )}
 
-      {!hasImport && <ImportPanel username={username} onImported={onImported} />}
+      {issuedCode && (
+        <AccessCodePanel username={username} issuedCode={issuedCode} />
+      )}
+
+      {needsCode && (
+        <AccessCodePanel username={username} onUnlocked={onUnlocked} />
+      )}
+
+      {!hasImport && !needsCode && <ImportPanel username={username} onImported={onImported} />}
 
       {hasImport && recs === null && <SkeletonGrid />}
 

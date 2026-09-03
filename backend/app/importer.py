@@ -21,6 +21,13 @@ import zipfile
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
+# A 25MB zip of repetitive CSV text decompresses to tens of gigabytes, and
+# csv.DictReader is read into a list — so the compressed cap alone does not bound
+# memory. Check the declared uncompressed size before opening any member, and cap
+# the row count in case a crafted zip understates it.
+MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+MAX_ROWS_PER_FILE = 200_000
+
 RATINGS_FILE = "ratings.csv"
 WATCHED_FILE = "watched.csv"
 PROFILE_FILE = "profile.csv"
@@ -50,6 +57,8 @@ def parse_export(data: bytes) -> dict:
             "That isn't a zip file. Upload the .zip you downloaded from "
             "Letterboxd (Settings -> Data -> Export Your Data).") from None
 
+    _reject_zip_bomb(archive)
+
     names = set(archive.namelist())
     if RATINGS_FILE not in names:
         raise ExportParseError(
@@ -61,6 +70,15 @@ def parse_export(data: bytes) -> dict:
     username = _read_username(archive) if PROFILE_FILE in names else None
     return {"username": username, "films": _merge(rated, watched)}
 
+def _reject_zip_bomb(archive) -> None:
+    """The zip header declares each member's uncompressed size, so an absurd
+    expansion ratio is knowable before a single byte is decompressed."""
+    total = sum(info.file_size for info in archive.infolist())
+    if total > MAX_UNCOMPRESSED_BYTES:
+        raise ExportParseError(
+            "The contents of that zip are far larger than a Letterboxd export — "
+            "refusing to unpack it.")
+
 def _read_rows(archive, filename, required_columns) -> list[dict]:
     with archive.open(filename) as raw:
         reader = csv.DictReader(io.TextIOWrapper(raw, "utf-8-sig"))
@@ -70,7 +88,14 @@ def _read_rows(archive, filename, required_columns) -> list[dict]:
             raise ExportParseError(
                 f"{filename} is missing the {', '.join(sorted(missing))} "
                 f"column(s). Found: {', '.join(reader.fieldnames or ['nothing'])}.")
-        return list(reader)
+        rows = []
+        for row in reader:
+            if len(rows) >= MAX_ROWS_PER_FILE:
+                raise ExportParseError(
+                    f"{filename} has more than {MAX_ROWS_PER_FILE:,} rows — "
+                    "that isn't a Letterboxd export.")
+            rows.append(row)
+        return rows
 
 def _read_username(archive) -> str | None:
     rows = _read_rows(archive, PROFILE_FILE, {"Username"})

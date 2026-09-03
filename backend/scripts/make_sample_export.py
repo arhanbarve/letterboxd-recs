@@ -10,8 +10,13 @@ asserts on the import step.
 import zipfile
 from pathlib import Path
 
-FIXTURE = (Path(__file__).resolve().parents[2]
-           / "frontend/tests/e2e/fixtures/letterboxd-export-sample.zip")
+FIXTURES = Path(__file__).resolve().parents[2] / "frontend/tests/e2e/fixtures"
+FIXTURE = FIXTURES / "letterboxd-export-sample.zip"
+# Same export minus profile.csv, so the importing test can pick its own username
+# rather than being pinned to the one baked into profile.csv. Access codes make
+# a username single-use, so the E2E import has to be able to claim a fresh one
+# on every run.
+FIXTURE_NO_PROFILE = FIXTURES / "letterboxd-export-sample-no-profile.zip"
 
 PROFILE = ("Date Joined,Username,Given Name,Family Name,Email Address,Location,"
            "Website,Bio,Pronoun,Favorite Films\n"
@@ -35,19 +40,21 @@ def main():
         f"{d},{n},{y},{u}\n" for d, n, y, u, _ in RATINGS) + "".join(
         f"{d},{n},{y},{u}\n" for d, n, y, u in WATCHED_ONLY)
 
-    FIXTURE.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(FIXTURE, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("profile.csv", PROFILE)
-        z.writestr("ratings.csv", ratings)
-        z.writestr("watched.csv", watched)
-        z.writestr("watchlist.csv", "Date,Name,Year,Letterboxd URI\n")
-        z.writestr("diary.csv", "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n")
-        z.writestr("reviews.csv", "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Review,Tags,Watched Date\n")
-        z.writestr("comments.csv", "Date,Type,Item,Comment\n")
-        z.writestr("likes/films.csv", "Date,Name,Year,Letterboxd URI\n")
-        z.writestr("deleted/diary.csv", "Date,Name\n")
-        z.writestr("orphaned/reviews.csv", "Date,Name\n")
-    print(f"wrote {FIXTURE} ({FIXTURE.stat().st_size} bytes)")
+    FIXTURES.mkdir(parents=True, exist_ok=True)
+    for path, with_profile in ((FIXTURE, True), (FIXTURE_NO_PROFILE, False)):
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+            if with_profile:
+                z.writestr("profile.csv", PROFILE)
+            z.writestr("ratings.csv", ratings)
+            z.writestr("watched.csv", watched)
+            z.writestr("watchlist.csv", "Date,Name,Year,Letterboxd URI\n")
+            z.writestr("diary.csv", "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n")
+            z.writestr("reviews.csv", "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Review,Tags,Watched Date\n")
+            z.writestr("comments.csv", "Date,Type,Item,Comment\n")
+            z.writestr("likes/films.csv", "Date,Name,Year,Letterboxd URI\n")
+            z.writestr("deleted/diary.csv", "Date,Name\n")
+            z.writestr("orphaned/reviews.csv", "Date,Name\n")
+        print(f"wrote {path} ({path.stat().st_size} bytes)")
 
 if __name__ == "__main__":
     main()

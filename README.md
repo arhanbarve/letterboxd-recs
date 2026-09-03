@@ -14,6 +14,16 @@ The app reads only `ratings.csv` (your ratings), `watched.csv` (so watched films
 
 Re-import whenever you want new ratings counted. Scoring can be re-run any time without re-uploading.
 
+### Your access code
+
+A Letterboxd username is just a string anyone could type, so the first import under a username **claims** it: the app mints an access code, shows it once, and stores it in that browser. Every later read or write for that username has to present it back.
+
+- You never need the code on the device you imported from — it is already saved there.
+- Save it if you want to open your recommendations on another device; paste it when the app asks.
+- Lose it and nobody, including you, can read or overwrite that username's data. Import under a slightly different username to start fresh.
+
+Only the SHA-256 of a code is stored, so the database never holds a working code.
+
 ## Local setup
 
 **Backend:**
@@ -43,8 +53,19 @@ cd frontend && npm test                          # unit
 cd frontend && npx playwright test               # E2E (needs the backend running)
 ```
 
-The E2E import test uses a synthetic export fixture. Regenerate it with
+The E2E import tests use synthetic export fixtures and claim a fresh username on
+each run. Regenerate the fixtures with
 `cd backend && .venv/bin/python scripts/make_sample_export.py`.
+
+`tests/e2e/app.spec.js` reads seeded data instead, so it needs a locally
+imported account and its access code, and skips without them:
+
+```bash
+E2E_USERNAME=<user> E2E_ACCESS_CODE=<code> npx playwright test
+```
+
+Running the import suite repeatedly can hit the import rate limit; start the
+backend with `RATE_LIMIT_IMPORTS_PER_HOUR=1000` while iterating.
 
 ## Deploying so friends can use it
 
@@ -60,7 +81,7 @@ Two pieces: backend on **Railway**, frontend on **Vercel**. Both have free tiers
    - `OMDB_API_KEY` — optional, adds IMDb/Rotten Tomatoes scores to the top results
    - `DB_PATH` — `/data/letterboxd.db` (matching the volume mount)
    - `CORS_ORIGINS` — your Vercel frontend URL once you have it (comma-separate multiple origins if needed)
-   - `CORS_ORIGIN_REGEX` — optional pattern, e.g. `https://your-project-.*\.vercel\.app`, so Vercel preview deployments (a new hostname per push) aren't rejected by CORS
+   - `CORS_ORIGIN_REGEX` — optional pattern so Vercel preview deployments (a new hostname per push) aren't rejected by CORS. **Anchor it** with `^` and `$`, e.g. `^https://your-project(-[a-z0-9]+-[a-z0-9-]+)?\.vercel\.app$` — an unanchored `.*\.vercel\.app` lets any site hosted on Vercel call your API
 5. Deploy. Note the public Railway URL (e.g. `https://your-app.up.railway.app`).
 
 ### Frontend (Vercel)
@@ -77,4 +98,6 @@ If the deployed app reports "Failed to fetch", it is almost always one of those 
 - TMDB ids are resolved from title+year, since the export identifies films only by a `boxd.it` shortlink. Resolution is cached per film, so the first refresh after an import is the slow one. Any film TMDB can't match is skipped and counted in the finish message.
 - Letterboxd records a film's premiere year while TMDB records its release year, so lookups retry ±1 year — without that, a couple of percent of films fail to match for no real reason.
 - Candidate generation is capped (50 seed films, 5000 candidates) to keep a refresh in the minutes, not hours.
-- No accounts/auth: anyone with the URL can enter any Letterboxd username. Fine for a small trusted friend group; not intended for public/untrusted use.
+- No accounts, no passwords, no email. Access is one per-username code, minted at first import (see above) — enough to keep one person's ratings from another's on a shared deployment, but it is not a hardened identity system: anyone holding a code has full access to that username's data.
+- Rate limits are per client IP and in-process, so they reset on redeploy and are shared by everyone behind one NAT. Tune with `RATE_LIMIT_IMPORTS_PER_HOUR` / `RATE_LIMIT_REFRESHES_PER_HOUR`.
+- Uploads are capped at 25MB compressed and 200MB uncompressed, so a zip bomb is rejected from its header rather than unpacked.

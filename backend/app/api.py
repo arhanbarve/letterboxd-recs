@@ -1,16 +1,20 @@
 import dataclasses
 import json
 import threading
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth import TOKEN_HEADER, hash_token, mint_token, token_matches
 from app.config import load_config
-from app.db import (connect, init_schema, import_status, load_imported_films,
-                    lookup_slug_tmdb, replace_imported_films,
-                    set_imported_tmdb_id, store_slug_tmdb)
-from app.errors import Cancelled
-from app.importer import ExportParseError, parse_export
+from app.db import (connect, get_token_hash, init_schema, import_status,
+                    load_imported_films, lookup_slug_tmdb,
+                    replace_imported_films, set_imported_tmdb_id,
+                    store_slug_tmdb, store_token_hash)
+from app.errors import Cancelled, safe_message
+from app.importer import MAX_UPLOAD_BYTES, ExportParseError, parse_export
+from app.ratelimit import RateLimiter
 from app.omdb import fetch_ratings
 from app.pipeline import run_refresh, Deps
 from app.resolver import make_resolver
@@ -20,6 +24,20 @@ from app.taste_dashboard import build_dashboard
 
 class RefreshRequest(BaseModel):
     username: str | None = None
+
+# Per client IP, per path. The refresh and import paths are the expensive ones —
+# a refresh fans out thousands of TMDB/OMDB calls on a shared key, and an import
+# accepts a file — so they get a much tighter ceiling than plain reads.
+DEFAULT_RATE_LIMIT = (120, 60.0)
+RATE_LIMITS = {
+    "/api/import": (20, 3600.0),
+    "/api/refresh": (10, 3600.0),
+}
+
+WRONG_CODE_DETAIL = (
+    "Wrong or missing access code for that username. The code was shown when "
+    "the export was first imported — paste it in, or re-import the export from "
+    "the device that has it.")
 
 def _real_watch_providers(tmdb_id):
     cfg = load_config()
@@ -68,12 +86,40 @@ def _real_refresh(conn, username=None, on_progress=None, cancel_event=None):
 def create_app(
     conn_factory=None, refresh_fn=_real_refresh, watch_providers_fn=_real_watch_providers,
     cors_origins=("http://localhost:5173",), cors_origin_regex=None,
+    rate_limits=None, default_rate_limit=None,
 ) -> FastAPI:
     app = FastAPI()
+    limiter = RateLimiter()
+    limits = RATE_LIMITS if rate_limits is None else rate_limits
+    fallback_limit = default_rate_limit or DEFAULT_RATE_LIMIT
+
+    # Registered before CORS so that CORS ends up the *outer* middleware and a
+    # 429 still carries its Access-Control headers — otherwise the browser
+    # reports a CORS failure instead of the real "slow down".
+    @app.middleware("http")
+    async def rate_limit(request, call_next):
+        if request.method == "OPTIONS":  # never throttle a CORS preflight
+            return await call_next(request)
+        limit, window = limits.get(request.url.path, fallback_limit)
+        client = request.client.host if request.client else "unknown"
+        if not limiter.check(f"{client}:{request.url.path}", limit, window):
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests — wait a bit and try again."})
+        return await call_next(request)
+
     app.add_middleware(
         CORSMiddleware, allow_origins=list(cors_origins),
         allow_origin_regex=cors_origin_regex,
         allow_methods=["*"], allow_headers=["*"])
+
+    def authorize(conn, username, access_code):
+        """Every user-scoped endpoint goes through here. An unclaimed username has
+        no data to protect, but it also has nothing to return, so both cases are
+        the same 403 — that way the response does not tell a stranger which
+        usernames exist."""
+        if not username or not token_matches(access_code, get_token_hash(conn, username)):
+            raise HTTPException(status_code=403, detail=WRONG_CODE_DETAIL)
 
     progress_lock = threading.Lock()
     progress_by_user = {}
@@ -94,8 +140,9 @@ def create_app(
         return conn
 
     @app.get("/api/recommendations")
-    def recommendations(username: str):
+    def recommendations(username: str, access_code: str | None = Header(None, alias=TOKEN_HEADER)):
         conn = get_conn()
+        authorize(conn, username, access_code)
         rows = conn.execute(
             "SELECT f.tmdb_id, f.title, f.year, f.poster_path, f.backdrop_path,"
             " f.imdb_rating, f.rt_score, f.tmdb_vote_avg,"
@@ -117,9 +164,13 @@ def create_app(
         } for r in rows]
 
     @app.post("/api/import")
-    def import_export(file: UploadFile = File(...), username: str | None = Form(None)):
+    def import_export(file: UploadFile = File(...), username: str | None = Form(None),
+                      access_code: str | None = Header(None, alias=TOKEN_HEADER)):
+        # Read one byte past the cap rather than the whole body: an oversized
+        # upload is then rejected without ever being held in full.
+        raw = file.file.read(MAX_UPLOAD_BYTES + 1)
         try:
-            parsed = parse_export(file.file.read())
+            parsed = parse_export(raw)
         except ExportParseError as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
         owner = parsed["username"] or username
@@ -129,21 +180,48 @@ def create_app(
                 detail="That export has no profile.csv, so we can't tell whose it "
                        "is — type your Letterboxd username and upload again.")
         conn = get_conn()
+
+        # First import for a username claims it and mints the access code; every
+        # later import has to prove it holds that code, so a stranger cannot
+        # overwrite someone else's data by guessing their Letterboxd username.
+        stored = get_token_hash(conn, owner)
+        issued = None
+        if stored is None:
+            issued = mint_token()
+            store_token_hash(conn, owner, hash_token(issued))
+        elif not token_matches(access_code, stored):
+            raise HTTPException(status_code=403, detail=WRONG_CODE_DETAIL)
+
         replace_imported_films(conn, owner, parsed["films"])
-        return {"username": owner, **import_status(conn, owner)}
+        body = {"username": owner, **import_status(conn, owner)}
+        if issued:
+            body["access_code"] = issued
+        return body
 
     @app.get("/api/import/status")
-    def get_import_status(username: str):
-        return import_status(get_conn(), username)
+    def get_import_status(username: str,
+                          access_code: str | None = Header(None, alias=TOKEN_HEADER)):
+        # The one endpoint that answers without a code, because the app needs it
+        # to decide whether to show the first-import panel. It reveals only
+        # whether the username is claimed — never any film data.
+        conn = get_conn()
+        stored = get_token_hash(conn, username)
+        if stored is None:
+            return {"imported": 0, "rated": 0, "imported_at": None, "claimed": False}
+        if not token_matches(access_code, stored):
+            return {"imported": 0, "rated": 0, "imported_at": None, "claimed": True}
+        return {**import_status(conn, username), "claimed": True}
 
     @app.get("/api/taste-profile")
-    def taste_profile(username: str):
+    def taste_profile(username: str, access_code: str | None = Header(None, alias=TOKEN_HEADER)):
         conn = get_conn()
+        authorize(conn, username, access_code)
         return build_dashboard(conn, username)
 
     @app.get("/api/last-updated")
-    def last_updated(username: str):
+    def last_updated(username: str, access_code: str | None = Header(None, alias=TOKEN_HEADER)):
         conn = get_conn()
+        authorize(conn, username, access_code)
         row = conn.execute(
             "SELECT MAX(computed_at) AS ts FROM recommendations WHERE username = ?",
             (username,)).fetchone()
@@ -170,19 +248,27 @@ def create_app(
                 set_progress({"stage": "cancelled", "current": 0, "total": None, "message": "Refresh cancelled."})
             except Exception as e:
                 conn.rollback()
-                set_progress({"stage": "error", "current": 0, "total": None, "message": str(e)})
+                # safe_message, never str(e): a requests HTTPError carries the
+                # full upstream URL, and TMDB/OMDB take the API key as a query
+                # parameter — so the raw text would publish a live key here.
+                set_progress({"stage": "error", "current": 0, "total": None,
+                              "message": safe_message(e)})
 
         threading.Thread(target=run, daemon=True).start()
         return {"status": "started"}
 
     @app.post("/api/refresh")
-    def refresh(body: RefreshRequest | None = None):
+    def refresh(body: RefreshRequest | None = None,
+                access_code: str | None = Header(None, alias=TOKEN_HEADER)):
         username = body.username if body else None
+        authorize(get_conn(), username, access_code)
         return _launch_refresh(username, "Starting refresh...")
 
     @app.post("/api/refresh/cancel")
-    def refresh_cancel(body: RefreshRequest | None = None):
+    def refresh_cancel(body: RefreshRequest | None = None,
+                       access_code: str | None = Header(None, alias=TOKEN_HEADER)):
         username = body.username if body else None
+        authorize(get_conn(), username, access_code)
         with progress_lock:
             ev = cancel_events.get(username)
             if ev is None:
@@ -192,7 +278,11 @@ def create_app(
         return {"status": "cancelling"}
 
     @app.get("/api/refresh/status")
-    def refresh_status(username: str | None = None):
+    def refresh_status(username: str | None = None,
+                       access_code: str | None = Header(None, alias=TOKEN_HEADER)):
+        # Gated as tightly as the data endpoints: progress messages carry
+        # upstream error text, which is the one place an API key could surface.
+        authorize(get_conn(), username, access_code)
         with progress_lock:
             return progress_by_user.get(
                 username, {"stage": "idle", "current": 0, "total": None, "message": ""})
@@ -225,4 +315,7 @@ def create_app(
     return app
 
 _cfg = load_config()
-app = create_app(cors_origins=_cfg.cors_origins, cors_origin_regex=_cfg.cors_origin_regex)
+app = create_app(
+    cors_origins=_cfg.cors_origins, cors_origin_regex=_cfg.cors_origin_regex,
+    rate_limits={"/api/import": (_cfg.imports_per_hour, 3600.0),
+                 "/api/refresh": (_cfg.refreshes_per_hour, 3600.0)})
