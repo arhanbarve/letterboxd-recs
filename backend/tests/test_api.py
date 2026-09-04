@@ -623,3 +623,20 @@ def test_recommendations_does_not_query_cast_once_per_row():
     assert body[0]["starring"] == ["Actor1"]
     # auth + rows + cast — a handful, not one per recommendation
     assert queries["n"] <= 5, f"40 recommendations issued {queries['n']} queries"
+
+def test_schema_is_initialised_once_not_per_request(monkeypatch, tmp_path):
+    """Twenty DDL statements per request meant twenty round trips and DDL locks
+    that concurrent callers blocked on; the API looked hung."""
+    import app.api as api_mod
+    from app.config import Config
+    from tests.conftest import TEST_DSN
+    calls = {"n": 0}
+    real_init = api_mod.init_schema
+    monkeypatch.setattr(api_mod, "init_schema",
+                        lambda c: (calls.__setitem__("n", calls["n"] + 1), real_init(c))[1])
+    monkeypatch.setattr(api_mod, "load_config", lambda: Config(
+        username="", tmdb_api_key="k", database_url=TEST_DSN))
+    client = TestClient(api_mod.create_app(refresh_fn=_noop_refresh))
+    for _ in range(4):
+        client.get("/api/import/status", params={"username": "nobody"})
+    assert calls["n"] == 1, f"init_schema ran {calls['n']} times across 4 requests"

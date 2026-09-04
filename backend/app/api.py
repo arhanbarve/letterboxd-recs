@@ -131,12 +131,20 @@ def create_app(
                 progress_by_user.setdefault(username, {}).update(p)
         return set_progress
 
+    schema_ready = threading.Event()
+
     def get_conn():
         if conn_factory:
             return conn_factory()
         cfg = load_config()
         conn = connect(cfg.database_url)
-        init_schema(conn)
+        # init_schema issues twenty DDL statements. Running it per request meant
+        # twenty round trips on every call and, worse, DDL locks that concurrent
+        # requests blocked on — which read as the API hanging. It is idempotent
+        # and the schema cannot change under a running process, so once is right.
+        if not schema_ready.is_set():
+            init_schema(conn)
+            schema_ready.set()
         return conn
 
     @app.get("/healthz")
