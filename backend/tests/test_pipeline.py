@@ -463,3 +463,20 @@ def test_refresh_gives_up_rather_than_hanging_forever(monkeypatch):
         related_fn=lambda tid, key: set())
     with pytest.raises(RuntimeError, match="gave up"):
         run_refresh(conn, cfg, deps)
+
+def test_candidate_pool_ceiling_is_env_tunable():
+    """Scoring cost scales with the pool, and it is what a small instance cannot
+    finish — so the ceiling has to be adjustable without a code change."""
+    import importlib
+    import app.pipeline as pl
+    import os
+    os.environ["MAX_CANDIDATE_POOL"] = "1234"
+    os.environ["OMDB_TOP_N"] = "7"
+    try:
+        importlib.reload(pl)
+        assert pl.MAX_CANDIDATE_POOL == 1234
+        assert pl.OMDB_TOP_N == 7
+    finally:
+        del os.environ["MAX_CANDIDATE_POOL"], os.environ["OMDB_TOP_N"]
+        importlib.reload(pl)
+    assert pl.MAX_CANDIDATE_POOL == 800  # the default a free instance can finish

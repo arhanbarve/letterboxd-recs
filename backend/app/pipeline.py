@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -11,14 +12,19 @@ from app.scorer import score_candidates
 LIKED_THRESHOLD = 4.0
 FALLBACK_THRESHOLD = 3.5
 TOP_PEOPLE_COUNT = 5
-OMDB_TOP_N = 80
+
+# Scoring is pure CPU over the whole candidate pool, and it is the part that a
+# small instance cannot finish: at 5000 candidates it starved a 0.1-CPU box hard
+# enough to stop answering health checks, so the platform killed the run. Both
+# ceilings are env-tunable — raise them on a machine with cores to spare.
+OMDB_TOP_N = int(os.environ.get("OMDB_TOP_N", "30"))
 
 # Candidate generation fans out ~3 pages of TMDB "related" per seed film, and
 # every candidate then costs one enrich call. Left uncapped, a full imported
 # watch history turns a ~3-minute refresh into an hours-long one, so both ends
 # are bounded: the seeds we expand from, and the pool they may grow to.
 MAX_SEED_FILMS = 50
-MAX_CANDIDATE_POOL = 5000
+MAX_CANDIDATE_POOL = int(os.environ.get("MAX_CANDIDATE_POOL", "800"))
 
 @dataclass
 class Deps:

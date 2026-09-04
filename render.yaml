@@ -18,6 +18,12 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.12"
+      # Scoring is CPU-bound over the whole pool; these are sized for a
+      # free instance. Raise them on a plan with real CPU.
+      - key: MAX_CANDIDATE_POOL
+        value: "800"
+      - key: OMDB_TOP_N
+        value: "30"
       - key: CORS_ORIGINS
         value: https://arhan-lbxd-recs.vercel.app
       # Vercel preview deployments get a new hostname per push. Anchored, so it
