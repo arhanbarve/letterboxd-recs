@@ -1,5 +1,9 @@
 # Letterboxd Recs by Arhan
 
+**Live:** [arhan-lbxd-recs.vercel.app](https://arhan-lbxd-recs.vercel.app) — frontend on Vercel,
+API on Render, Postgres on Neon. The API sleeps when idle, so the first request
+after a quiet spell takes a few seconds to wake.
+
 You upload your own Letterboxd data export; the app enriches it with TMDB and recommends unwatched films with a predicted ★ rating and match %. Supports multiple people sharing one deployment — each person's data is scoped to their own Letterboxd username.
 
 Nothing here crawls Letterboxd. Letterboxd sits behind Cloudflare bot-management that refuses automated crawling outright, so the data comes from the export Letterboxd gives you on request — which is also complete, instant, and impossible to get blocked.
