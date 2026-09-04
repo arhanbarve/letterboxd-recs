@@ -139,6 +139,14 @@ def create_app(
         init_schema(conn)
         return conn
 
+    @app.get("/healthz")
+    def healthz():
+        """Liveness only — deliberately touches no database and takes no lock.
+        A health check that opens a Postgres connection is one the platform will
+        fail under CPU contention, and Render restarts the instance when it does,
+        killing any refresh running in a background thread."""
+        return {"ok": True}
+
     @app.get("/api/recommendations")
     def recommendations(username: str, access_code: str | None = Header(None, alias=TOKEN_HEADER)):
         conn = get_conn()

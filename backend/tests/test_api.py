@@ -588,3 +588,13 @@ def test_import_and_refresh_have_tighter_ceilings_than_plain_reads():
     for path in ("/api/import", "/api/refresh"):
         limit, window = RATE_LIMITS[path]
         assert limit * (3600 / window) < reads_per_hour
+
+def test_healthz_needs_no_database_and_no_access_code():
+    """Render restarts an instance whose health check times out, which kills any
+    in-flight refresh. So this endpoint must not open a connection."""
+    def exploding_conn():
+        raise AssertionError("health check must not touch the database")
+    client = TestClient(create_app(conn_factory=exploding_conn, refresh_fn=_noop_refresh))
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
