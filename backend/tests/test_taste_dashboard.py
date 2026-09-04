@@ -89,3 +89,30 @@ def test_build_dashboard_empty_for_user_with_no_ratings(tmp_path):
     assert dash["total_rated"] == 0
     assert dash["top_directors"] == []
     assert dash["top_actors"] == []
+
+def test_dashboard_does_not_query_per_rated_film():
+    """Four queries per film meant ~380 round trips for a 95-film profile and a
+    twenty-second response every time the tab was opened."""
+    conn = connect(TEST_DSN); init_schema(conn)
+    for i in range(1, 41):
+        conn.execute("INSERT INTO films (tmdb_id,title,year,decade,director)"
+                     " VALUES (%s,%s,2000,2000,%s)", (i, f"F{i}", f"Dir{i}"))
+        conn.execute("INSERT INTO film_genres VALUES (%s,'Drama')", (i,))
+        conn.execute("INSERT INTO film_keywords VALUES (%s,'kw')", (i,))
+        conn.execute("INSERT INTO film_cast VALUES (%s,%s,%s)", (i, f"Actor{i}", i))
+        conn.execute("INSERT INTO ratings (username,film_id,your_rating)"
+                     " VALUES ('alice',%s,4.0)", (i,))
+    conn.commit()
+
+    queries = {"n": 0}
+    real_execute = conn.execute
+    class CountingConn:
+        def __getattr__(self, k): return getattr(conn, k)
+        def execute(self, *a, **kw): queries["n"] += 1; return real_execute(*a, **kw)
+
+    dash = build_dashboard(CountingConn(), "alice")
+    assert dash["total_rated"] == 40
+    assert dash["genre_affinities"][0]["name"] == "Drama"
+    # rated rows + genres + keywords + cast + directors + people lookups — a
+    # fixed handful, not four per film
+    assert queries["n"] <= 10, f"40 rated films issued {queries['n']} queries"

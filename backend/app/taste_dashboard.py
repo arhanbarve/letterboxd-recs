@@ -86,21 +86,36 @@ def build_dashboard(conn, username: str) -> dict:
     total_rated = len(rated_rows)
     average_rating = (sum(r["your_rating"] for r in rated_rows) / total_rated) if total_rated else 0.0
 
-    rated_meta = []
-    for r in rated_rows:
-        genres = [g["genre"] for g in conn.execute(
-            "SELECT genre FROM film_genres WHERE film_id = %s", (r["tmdb_id"],)).fetchall()]
-        keywords = [k["keyword"] for k in conn.execute(
-            "SELECT keyword FROM film_keywords WHERE film_id = %s", (r["tmdb_id"],)).fetchall()]
-        cast = [c["actor"] for c in conn.execute(
-            "SELECT actor FROM film_cast WHERE film_id = %s", (r["tmdb_id"],)).fetchall()]
-        director_row = conn.execute(
-            "SELECT director FROM films WHERE tmdb_id = %s", (r["tmdb_id"],)).fetchone()
-        rated_meta.append({
-            "rating": r["your_rating"], "genres": genres, "keywords": keywords,
-            "cast": cast, "director": director_row["director"] if director_row else None,
-            "decade": r["decade"],
-        })
+    # Four queries for the whole set, not four per film. At 95 rated films the
+    # per-film version issued ~380 round trips to the database and took twenty
+    # seconds every time the tab was opened.
+    film_ids = [r["tmdb_id"] for r in rated_rows]
+    genres_by, keywords_by, cast_by, directors = {}, {}, {}, {}
+    if film_ids:
+        for row in conn.execute(
+                "SELECT film_id, genre FROM film_genres WHERE film_id = ANY(%s)",
+                (film_ids,)).fetchall():
+            genres_by.setdefault(row["film_id"], []).append(row["genre"])
+        for row in conn.execute(
+                "SELECT film_id, keyword FROM film_keywords WHERE film_id = ANY(%s)",
+                (film_ids,)).fetchall():
+            keywords_by.setdefault(row["film_id"], []).append(row["keyword"])
+        for row in conn.execute(
+                "SELECT film_id, actor FROM film_cast WHERE film_id = ANY(%s)",
+                (film_ids,)).fetchall():
+            cast_by.setdefault(row["film_id"], []).append(row["actor"])
+        directors = {row["tmdb_id"]: row["director"] for row in conn.execute(
+            "SELECT tmdb_id, director FROM films WHERE tmdb_id = ANY(%s)",
+            (film_ids,)).fetchall()}
+
+    rated_meta = [{
+        "rating": r["your_rating"],
+        "genres": genres_by.get(r["tmdb_id"], []),
+        "keywords": keywords_by.get(r["tmdb_id"], []),
+        "cast": cast_by.get(r["tmdb_id"], []),
+        "director": directors.get(r["tmdb_id"]),
+        "decade": r["decade"],
+    } for r in rated_rows]
     profile = build_taste_profile(rated_meta)
     genre_affinities = _genre_affinities(profile)
     top_genre = genre_affinities[0]["name"] if genre_affinities else None
