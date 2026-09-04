@@ -158,9 +158,19 @@ def create_app(
             " FROM recommendations r JOIN films f ON f.tmdb_id = r.film_id"
             " WHERE r.username = %s"
             " ORDER BY r.match_pct DESC", (username,)).fetchall()
+        # One query for every film's cast, not one per row. At 800
+        # recommendations the per-row version meant 800 extra round trips and a
+        # 65-second response; the whole page is useless before it arrives.
+        film_ids = [r["tmdb_id"] for r in rows]
+        cast_by_film = {}
+        if film_ids:
+            for c in conn.execute(
+                "SELECT film_id, actor FROM film_cast WHERE film_id = ANY(%s)",
+                    (film_ids,)).fetchall():
+                cast_by_film.setdefault(c["film_id"], []).append(c["actor"])
+
         def starring(fid):
-            return [c["actor"] for c in conn.execute(
-                "SELECT actor FROM film_cast WHERE film_id = %s LIMIT 3", (fid,)).fetchall()]
+            return cast_by_film.get(fid, [])[:3]
         return [{
             "tmdb_id": r["tmdb_id"], "title": r["title"], "year": r["year"],
             "poster_path": r["poster_path"], "backdrop_path": r["backdrop_path"],

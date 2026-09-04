@@ -598,3 +598,28 @@ def test_healthz_needs_no_database_and_no_access_code():
     resp = client.get("/healthz")
     assert resp.status_code == 200
     assert resp.json() == {"ok": True}
+
+def test_recommendations_does_not_query_cast_once_per_row():
+    """At 800 recommendations the per-row cast lookup made the endpoint take
+    over a minute, which is indistinguishable from broken."""
+    conn = _mem_conn()
+    for i in range(1, 41):
+        conn.execute("INSERT INTO films (tmdb_id,title,year) VALUES (%s,%s,2000)", (i, f"F{i}"))
+        conn.execute("INSERT INTO film_cast VALUES (%s,%s,%s)", (i, f"Actor{i}", i))
+        conn.execute("INSERT INTO recommendations VALUES ('alice',%s,90.0,4.0,NULL,'now')", (i,))
+    conn.commit()
+    code = _claim(conn, "alice")
+
+    queries = {"n": 0}
+    real_execute = conn.execute
+    class CountingConn:
+        def __getattr__(self, k): return getattr(conn, k)
+        def execute(self, *a, **kw): queries["n"] += 1; return real_execute(*a, **kw)
+
+    client = TestClient(create_app(conn_factory=lambda: CountingConn(), refresh_fn=_noop_refresh))
+    body = client.get("/api/recommendations", params={"username": "alice"},
+                      headers=_auth(code)).json()
+    assert len(body) == 40
+    assert body[0]["starring"] == ["Actor1"]
+    # auth + rows + cast — a handful, not one per recommendation
+    assert queries["n"] <= 5, f"40 recommendations issued {queries['n']} queries"
