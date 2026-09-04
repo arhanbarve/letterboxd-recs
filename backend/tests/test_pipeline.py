@@ -1,6 +1,6 @@
 import pytest
 
-from app.db import connect, init_schema
+from app.db import connect, init_schema, replace_imported_films
 from app.pipeline import run_refresh, Deps
 from app.config import Config
 
@@ -393,3 +393,73 @@ def test_run_refresh_raises_cancelled_mid_scoring_loop(tmp_path):
         run_refresh(conn, cfg, deps, cancel_event=cancel_event)
     recs = conn.execute("SELECT * FROM recommendations").fetchall()
     assert recs == []  # cancelled before the commit at the end
+
+def test_persist_films_batches_instead_of_one_round_trip_per_film():
+    """The per-film version issued ~12 statements each; across a full candidate
+    pool that was tens of thousands of round trips, which is what made a refresh
+    outlast the platform's patience."""
+    from app.pipeline import _persist_films
+    conn = connect(TEST_DSN); init_schema(conn)
+    films = [{
+        "tmdb_id": i, "title": f"F{i}", "year": 2000, "decade": 2000,
+        "director": "D", "director_id": 7, "poster_path": "/p", "backdrop_path": "/b",
+        "overview": "o", "runtime": 100, "vote_avg": 7.0, "vote_count": 10,
+        "genres": ["Drama"], "keywords": ["k"], "cast": ["A"],
+        "director_person": {"person_id": 7, "name": "D", "profile_path": "/d"},
+        "cast_people": [{"person_id": 8, "name": "A", "profile_path": "/a"}],
+    } for i in range(1, 51)]
+
+    calls = {"n": 0}
+
+    class CountingCursor:
+        """Counts statements without subclassing — psycopg cursors do not allow
+        __class__ reassignment."""
+        def __init__(self, inner): self._inner = inner
+        def __enter__(self): self._inner.__enter__(); return self
+        def __exit__(self, *a): return self._inner.__exit__(*a)
+        def __getattr__(self, k): return getattr(self._inner, k)
+        def execute(self, *a, **kw): calls["n"] += 1; return self._inner.execute(*a, **kw)
+        def executemany(self, *a, **kw): calls["n"] += 1; return self._inner.executemany(*a, **kw)
+
+    class CountingConn:
+        def __getattr__(self, k): return getattr(conn, k)
+        def cursor(self, *a, **kw): return CountingCursor(conn.cursor(*a, **kw))
+
+    _persist_films(CountingConn(), films)
+    conn.commit()
+
+    assert calls["n"] <= 12, f"50 films took {calls['n']} statements; batching regressed"
+    assert conn.execute("SELECT count(*) AS c FROM films").fetchone()["c"] == 50
+    assert conn.execute("SELECT count(*) AS c FROM film_genres").fetchone()["c"] == 50
+    assert conn.execute("SELECT count(*) AS c FROM people").fetchone()["c"] == 2
+
+def test_persist_films_is_idempotent_and_replaces_child_rows():
+    from app.pipeline import _persist_films
+    conn = connect(TEST_DSN); init_schema(conn)
+    base = {"tmdb_id": 1, "title": "A", "year": 2000, "decade": 2000, "director": "D",
+            "director_id": None, "poster_path": None, "backdrop_path": None,
+            "overview": None, "runtime": None, "vote_avg": 5.0, "vote_count": 1,
+            "keywords": [], "cast": [], "cast_people": [], "director_person": None}
+    _persist_films(conn, [{**base, "genres": ["Drama", "Horror"]}])
+    _persist_films(conn, [{**base, "title": "A2", "genres": ["Drama"]}])
+    conn.commit()
+    assert conn.execute("SELECT title FROM films WHERE tmdb_id=1").fetchone()["title"] == "A2"
+    # stale genre must be gone, not accumulated
+    assert conn.execute("SELECT count(*) AS c FROM film_genres WHERE film_id=1").fetchone()["c"] == 1
+
+def test_refresh_gives_up_rather_than_hanging_forever(monkeypatch):
+    """A wedged upstream call used to occupy the process until the platform
+    killed it, losing everything."""
+    import app.pipeline as pl
+    monkeypatch.setattr(pl, "MAX_REFRESH_SECONDS", -1)  # already past the deadline
+    conn = connect(TEST_DSN); init_schema(conn)
+    replace_imported_films(conn, "alice", [
+        {"boxd_id": "a", "title": "A", "year": 2000, "rating": 5.0, "rated_date": "2026-01-01"}])
+    cfg = Config(username="alice", tmdb_api_key="k", database_url="postgresql:///unused")
+    deps = Deps(
+        load_films_fn=lambda u: [{"slug": "a", "title": "A", "year": 2000,
+                                  "rating": 5.0, "rated_date": None, "tmdb_id": 1}],
+        resolve_fn=None, enrich_fn=lambda tid, key: {},
+        related_fn=lambda tid, key: set())
+    with pytest.raises(RuntimeError, match="gave up"):
+        run_refresh(conn, cfg, deps)

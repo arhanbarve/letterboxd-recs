@@ -2,7 +2,9 @@ import time
 import requests
 
 API = "https://www.omdbapi.com/"
-TIMEOUT = 15
+# (connect, read). A scalar timeout only bounds the gap between bytes, so a
+# slow trickle can hang a request forever; the tuple bounds both phases.
+TIMEOUT = (5, 15)
 MAX_RETRIES = 3
 
 def _get(session, params):

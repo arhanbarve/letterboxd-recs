@@ -1,4 +1,5 @@
 import json
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -32,6 +33,14 @@ class Deps:
 def _noop(*args, **kwargs):
     pass
 
+def _check_deadline(started_at):
+    if started_at is not None and time.monotonic() - started_at > MAX_REFRESH_SECONDS:
+        raise RuntimeError(
+            f"Refresh gave up after {MAX_REFRESH_SECONDS // 60} minutes. This is "
+            "usually an upstream API being slow rather than your data — the work "
+            "done so far is saved, so running it again picks up most of it from "
+            "cache.")
+
 def _check_cancel(cancel_event):
     if cancel_event is not None and cancel_event.is_set():
         raise Cancelled()
@@ -54,6 +63,29 @@ def _top_people(profile, n=TOP_PEOPLE_COUNT):
     names = [name for name, score in (directors[:n] + actors[:n]) if score > 0]
     return names
 
+# Writes go out in batches of this size, each committed. Chosen so a crash or a
+# platform restart loses seconds of work rather than the entire run — the old
+# code held every write in one transaction until the very end.
+PERSIST_BATCH = 100
+
+# A refresh that has run this long is not going to finish; something upstream is
+# hanging. Fail with a message the user can act on instead of occupying the
+# process until the platform kills it.
+MAX_REFRESH_SECONDS = 25 * 60
+
+def _flush(conn, films, ratings) -> None:
+    """Persists a batch of enriched films plus their ratings, then commits."""
+    if not films and not ratings:
+        return
+    _persist_films(conn, films)
+    if ratings:
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO ratings (username,film_id,your_rating) VALUES (%s,%s,%s)"
+                " ON CONFLICT (username, film_id) DO UPDATE SET"
+                " your_rating = EXCLUDED.your_rating", ratings)
+    conn.commit()
+
 def _persist_person(conn, person):
     if person is None:
         return
@@ -64,37 +96,73 @@ def _persist_person(conn, person):
         (person["person_id"], person["name"], person["profile_path"]))
 
 def _persist_film(conn, m):
-    _persist_person(conn, m.get("director_person"))
-    for p in m.get("cast_people", []):
-        _persist_person(conn, p)
+    """Single-film convenience wrapper. Prefer _persist_films for bulk work."""
+    _persist_films(conn, [m])
 
-    conn.execute(
-        "INSERT INTO films"
-        " (tmdb_id,title,year,decade,director,director_id,poster_path,backdrop_path,overview,runtime,tmdb_vote_avg,vote_count)"
-        " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-        " ON CONFLICT (tmdb_id) DO UPDATE SET"
-        " title = EXCLUDED.title, year = EXCLUDED.year, decade = EXCLUDED.decade,"
-        " director = EXCLUDED.director, director_id = EXCLUDED.director_id,"
-        " poster_path = EXCLUDED.poster_path, backdrop_path = EXCLUDED.backdrop_path,"
-        " overview = EXCLUDED.overview, runtime = EXCLUDED.runtime,"
-        " tmdb_vote_avg = EXCLUDED.tmdb_vote_avg, vote_count = EXCLUDED.vote_count",
-        (m["tmdb_id"], m["title"], m["year"], m["decade"], m["director"], m.get("director_id"),
-         m["poster_path"], m.get("backdrop_path"), m.get("overview"), m.get("runtime"), m["vote_avg"],
-         m.get("vote_count")))
-    conn.execute("DELETE FROM film_genres WHERE film_id=%s", (m["tmdb_id"],))
-    conn.execute("DELETE FROM film_keywords WHERE film_id=%s", (m["tmdb_id"],))
-    conn.execute("DELETE FROM film_cast WHERE film_id=%s", (m["tmdb_id"],))
-    cast_people_by_name = {p["name"]: p["person_id"] for p in m.get("cast_people", [])}
+def _persist_films(conn, films) -> None:
+    """Writes a batch of enriched films in a fixed number of round trips.
+
+    The per-film version issued roughly a dozen statements each — people upserts,
+    the film upsert, three deletes and three inserts. Across a full candidate
+    pool that is tens of thousands of round trips to a database on the other side
+    of the network, which is what made a refresh take longer than the platform
+    would leave the process alive. Batching makes the cost proportional to the
+    number of statements, not the number of films.
+    """
+    films = [m for m in films if m]
+    if not films:
+        return
+
+    people = {}
+    for m in films:
+        for person in [m.get("director_person"), *m.get("cast_people", [])]:
+            if person:
+                people[person["person_id"]] = person
+
+    film_ids = [m["tmdb_id"] for m in films]
+    genres = [(m["tmdb_id"], g) for m in films for g in m.get("genres", [])]
+    keywords = [(m["tmdb_id"], k) for m in films for k in m.get("keywords", [])]
+    cast = []
+    for m in films:
+        by_name = {p["name"]: p["person_id"] for p in m.get("cast_people", [])}
+        cast += [(m["tmdb_id"], a, by_name.get(a)) for a in m.get("cast", [])]
+
     with conn.cursor() as cur:
-        cur.executemany("INSERT INTO film_genres VALUES (%s,%s)",
-                        [(m["tmdb_id"], g) for g in m["genres"]])
-        cur.executemany("INSERT INTO film_keywords VALUES (%s,%s)",
-                        [(m["tmdb_id"], k) for k in m["keywords"]])
-        cur.executemany("INSERT INTO film_cast VALUES (%s,%s,%s)",
-                        [(m["tmdb_id"], a, cast_people_by_name.get(a)) for a in m["cast"]])
+        if people:
+            cur.executemany(
+                "INSERT INTO people (person_id, name, profile_path) VALUES (%s,%s,%s)"
+                " ON CONFLICT (person_id) DO UPDATE SET"
+                " name = EXCLUDED.name, profile_path = EXCLUDED.profile_path",
+                [(p["person_id"], p["name"], p["profile_path"]) for p in people.values()])
+
+        cur.executemany(
+            "INSERT INTO films"
+            " (tmdb_id,title,year,decade,director,director_id,poster_path,backdrop_path,overview,runtime,tmdb_vote_avg,vote_count)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+            " ON CONFLICT (tmdb_id) DO UPDATE SET"
+            " title = EXCLUDED.title, year = EXCLUDED.year, decade = EXCLUDED.decade,"
+            " director = EXCLUDED.director, director_id = EXCLUDED.director_id,"
+            " poster_path = EXCLUDED.poster_path, backdrop_path = EXCLUDED.backdrop_path,"
+            " overview = EXCLUDED.overview, runtime = EXCLUDED.runtime,"
+            " tmdb_vote_avg = EXCLUDED.tmdb_vote_avg, vote_count = EXCLUDED.vote_count",
+            [(m["tmdb_id"], m["title"], m["year"], m["decade"], m["director"], m.get("director_id"),
+              m["poster_path"], m.get("backdrop_path"), m.get("overview"), m.get("runtime"),
+              m["vote_avg"], m.get("vote_count")) for m in films])
+
+        # One delete per table for the whole batch, rather than three per film.
+        for table in ("film_genres", "film_keywords", "film_cast"):
+            cur.execute(f"DELETE FROM {table} WHERE film_id = ANY(%s)", (film_ids,))
+
+        if genres:
+            cur.executemany("INSERT INTO film_genres VALUES (%s,%s)", genres)
+        if keywords:
+            cur.executemany("INSERT INTO film_keywords VALUES (%s,%s)", keywords)
+        if cast:
+            cur.executemany("INSERT INTO film_cast VALUES (%s,%s,%s)", cast)
 
 def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> None:
     on_progress = on_progress or _noop
+    started_at = time.monotonic()
 
     films = deps.load_films_fn(cfg.username)
     if not films:
@@ -117,6 +185,7 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> N
             should_cancel=lambda: cancel_event is not None and cancel_event.is_set(),
         )
     _check_cancel(cancel_event)
+    _check_deadline(started_at)
 
     # A film with no TMDB id can never be scored or recommended against, so it is
     # dropped — counted, not silently swallowed (reported in the done message).
@@ -137,19 +206,21 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> N
     # films, so paying an enrich call for it would buy nothing.
     rated_meta = []
     rated_total = len(rated)
+    pending, pending_ratings = [], []
     for i, f in enumerate(rated):
         _check_cancel(cancel_event)
+        _check_deadline(started_at)
         on_progress({"stage": "enriching", "current": i, "total": rated_total,
                      "message": f"Fetching film details... {i}/{rated_total}"})
         m = deps.enrich_fn(f["tmdb_id"], cfg.tmdb_api_key)
-        _persist_film(conn, m)
-        conn.execute(
-            "INSERT INTO ratings (username,film_id,your_rating) VALUES (%s,%s,%s)"
-            " ON CONFLICT (username, film_id) DO UPDATE SET"
-            " your_rating = EXCLUDED.your_rating",
-            (cfg.username, f["tmdb_id"], f["rating"]))
+        pending.append(m)
+        pending_ratings.append((cfg.username, f["tmdb_id"], f["rating"]))
         rm = dict(m); rm["rating"] = f["rating"]; rm["rated_date"] = f.get("rated_date")
         rated_meta.append(rm)
+        if len(pending) >= PERSIST_BATCH:
+            _flush(conn, pending, pending_ratings)
+            pending, pending_ratings = [], []
+    _flush(conn, pending, pending_ratings)
 
     on_progress({"stage": "profiling", "current": 0, "total": None,
                  "message": "Building your taste profile..."})
@@ -172,11 +243,15 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> N
     cand_meta = []
     for i, cid in enumerate(pool):
         _check_cancel(cancel_event)
+        _check_deadline(started_at)
         on_progress({"stage": "scoring", "current": i, "total": cand_total,
                      "message": f"Scoring candidates... {i}/{cand_total}"})
         cand_meta.append(deps.enrich_fn(cid, cfg.tmdb_api_key))
-    for m in cand_meta:
-        _persist_film(conn, m)
+    for start in range(0, len(cand_meta), PERSIST_BATCH):
+        _check_cancel(cancel_event)
+        _check_deadline(started_at)
+        _persist_films(conn, cand_meta[start:start + PERSIST_BATCH])
+        conn.commit()  # candidate metadata is a cache; committing early costs nothing
 
     results = score_candidates(cand_meta, profile, rated_meta)
 
@@ -184,6 +259,7 @@ def run_refresh(conn, cfg, deps: Deps, on_progress=None, cancel_event=None) -> N
         imdb_by_id = {m["tmdb_id"]: m.get("imdb_id") for m in cand_meta}
         for r in results[:OMDB_TOP_N]:
             _check_cancel(cancel_event)
+            _check_deadline(started_at)
             imdb_id = imdb_by_id.get(r["tmdb_id"])
             if not imdb_id:
                 continue
