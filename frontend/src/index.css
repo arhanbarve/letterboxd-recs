@@ -320,6 +320,14 @@ input:focus-visible,
   white-space: nowrap;
 }
 
+.demo-note {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 12px;
+}
+
 /* ---------- Refresh button (bulb-chase) ---------- */
 
 @property --chase-angle {

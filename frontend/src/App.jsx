@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { NavLink, Routes, Route } from "react-router-dom";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { NavLink, Routes, Route, useLocation } from "react-router-dom";
 import RecommendationsPage from "./RecommendationsPage";
 import TasteProfilePage from "./TasteProfilePage";
 import BulbSign from "./components/BulbSign";
@@ -9,6 +9,10 @@ import ImportPanel from "./components/ImportPanel";
 import { getImportStatus } from "./api";
 import { useLocalStorage } from "./lib/useLocalStorage";
 import { RefreshProvider, useRefresh } from "./context/RefreshContext";
+
+// Lazy so the snapshot JSON only downloads when someone opens a demo tab.
+const DemoRecommendationsPage = lazy(() => import("./demo/DemoRecommendationsPage"));
+const DemoTastePage = lazy(() => import("./demo/DemoTastePage"));
 
 function ControlBar({ username, setUsername, hasImport, onImported }) {
   const { isRunning, cancel, start } = useRefresh();
@@ -34,6 +38,7 @@ export default function App() {
   const [username, setUsername] = useLocalStorage("letterboxd_username", "");
   const [importStatus, setImportStatus] = useState(null);
   const [issuedCode, setIssuedCode] = useState(null);
+  const isDemo = useLocation().pathname.startsWith("/demo");
 
   useEffect(() => {
     if (!username) {
@@ -69,14 +74,18 @@ export default function App() {
       <nav className="tabs">
         <NavLink to="/" end className={({ isActive }) => `tab${isActive ? " active" : ""}`}>Recommendations</NavLink>
         <NavLink to="/taste" className={({ isActive }) => `tab${isActive ? " active" : ""}`}>Taste Profile</NavLink>
+        <NavLink to="/demo" end className={({ isActive }) => `tab${isActive ? " active" : ""}`}>Demo: Recs</NavLink>
+        <NavLink to="/demo/taste" className={({ isActive }) => `tab${isActive ? " active" : ""}`}>Demo: Taste</NavLink>
       </nav>
       <RefreshProvider username={username}>
-        <ControlBar
-          username={username}
-          setUsername={setUsername}
-          hasImport={hasImport}
-          onImported={onImported}
-        />
+        {!isDemo && (
+          <ControlBar
+            username={username}
+            setUsername={setUsername}
+            hasImport={hasImport}
+            onImported={onImported}
+          />
+        )}
         <div className="page">
           <Routes>
             <Route path="/" element={
@@ -90,6 +99,8 @@ export default function App() {
               />
             } />
             <Route path="/taste" element={<TasteProfilePage username={username} />} />
+            <Route path="/demo" element={<Suspense fallback={null}><DemoRecommendationsPage /></Suspense>} />
+            <Route path="/demo/taste" element={<Suspense fallback={null}><DemoTastePage /></Suspense>} />
           </Routes>
         </div>
       </RefreshProvider>

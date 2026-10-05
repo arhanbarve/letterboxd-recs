@@ -25,9 +25,15 @@ export default function ExpandedFilmCard({ film, onClose }) {
 
   useEffect(() => {
     setDetail(null); setProviders(null); setFailed(false);
+    // Demo snapshot films carry both already, so the popup never hits the backend.
+    if (film.providers) {
+      setDetail(film.detail ?? null);
+      setProviders(film.providers);
+      return;
+    }
     getFilmDetail(film.tmdb_id).then(setDetail).catch(() => {});
     getWatchProviders(film.tmdb_id).then(setProviders).catch(() => setFailed(true));
-  }, [film.tmdb_id]);
+  }, [film.tmdb_id, film.detail, film.providers]);
 
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();

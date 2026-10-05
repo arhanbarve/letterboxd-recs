@@ -116,6 +116,11 @@ export default function TasteProfilePage({ username }) {
     );
   }
 
+  return <TasteDashboard dash={dash} updatedAt={updatedAt} isRunning={isRunning} />;
+}
+
+// Rendering split from the fetching so the demo tab can show a snapshot.
+export function TasteDashboard({ dash, updatedAt, isRunning = false }) {
   return (
     <div className="taste-dashboard">
       {isRunning && <ProgressBar />}

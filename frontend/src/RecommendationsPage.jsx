@@ -31,7 +31,6 @@ export default function RecommendationsPage({
 }) {
   const [recs, setRecs] = useState(null);
   const [error, setError] = useState(null);
-  const [selectedFilm, setSelectedFilm] = useState(null);
   const [updatedAt, setUpdatedAt] = useState(null);
   const { status, isRunning, lastCompletedAt } = useRefresh();
   const hasImport = (importStatus?.imported ?? 0) > 0;
@@ -77,10 +76,6 @@ export default function RecommendationsPage({
     }
   }, [status]);
 
-  const { hero, main, longShots } = recs ? partitionRecs(recs) : { hero: [], main: [], longShots: [] };
-  const [longShown, setLongShown] = useState(0); // start collapsed
-  useEffect(() => { setLongShown(0); }, [recs]);
-
   return (
     <div>
       <LastUpdated iso={updatedAt} />
@@ -116,6 +111,20 @@ export default function RecommendationsPage({
         </div>
       )}
 
+      {recs && <RecList recs={recs} />}
+    </div>
+  );
+}
+
+// Rendering split from the fetching so the demo tab can show a snapshot.
+export function RecList({ recs }) {
+  const [selectedFilm, setSelectedFilm] = useState(null);
+  const { hero, main, longShots } = partitionRecs(recs);
+  const [longShown, setLongShown] = useState(0); // start collapsed
+  useEffect(() => { setLongShown(0); }, [recs]);
+
+  return (
+    <>
       <MarqueeTrio recs={hero} onSelect={setSelectedFilm} />
 
       {main.length > 0 && (
@@ -144,12 +153,12 @@ export default function RecommendationsPage({
                   Load 50 more
                 </button>
               )}
-            </>
-          )}
-        </div>
-      )}
+    </>
+        )}
+      </div>
+    )}
 
-      {selectedFilm && <ExpandedFilmCard film={selectedFilm} onClose={() => setSelectedFilm(null)} />}
-    </div>
+    {selectedFilm && <ExpandedFilmCard film={selectedFilm} onClose={() => setSelectedFilm(null)} />}
+    </>
   );
 }
